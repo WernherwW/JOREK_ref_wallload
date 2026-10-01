@@ -505,7 +505,8 @@ mpi_comm_in,mpi_info_in,test_in)
   call HDF5_array1D_reading_char(file_id, part_groups_in_use_old, '/part_groups_in_use')
   !> overwrite part_groups_in_use with part_groups_in_use_old read in from 
   !> restart if it has not been manually defined
-  if (part_groups_in_use(1) == 'non') part_groups_in_use(1:n_groups_old) = part_groups_in_use_old 
+  !if (part_groups_in_use(1) == 'non') part_groups_in_use(1:n_groups_old) = part_groups_in_use_old 
+  part_groups_in_use(1:n_groups_old) = part_groups_in_use_old   ! Chizhou WANG DEBUG
 
   !> set up a recording of which group from part_restart.h5 has been dropped
   allocate(dropped_groups_mask(n_groups_old))

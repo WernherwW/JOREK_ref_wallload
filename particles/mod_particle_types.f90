@@ -822,7 +822,30 @@ subroutine initialize_particle_list_to_zero(n_particles,particle_list,ierr)
   !$omp parallel do default(none) private(ii),firstprivate(n_particles) &
   !$omp shared(particle_list)
   do ii=1,n_particles
-    call initialize_particle_to_zero(particle_list(ii))
+    particle_list(ii)%i_elm=0;    particle_list(ii)%i_life=0; 
+    particle_list(ii)%t_birth=0.; particle_list(ii)%weight=0d0;
+    particle_list(ii)%t_loss=0.;
+    particle_list(ii)%st=0d0;     particle_list(ii)%x=0d0;
+    select type (p=>particle_list(ii))
+      type is (particle_fieldline)
+      p%v=0d0; p%B_hat_prev=0d0;
+      type is (particle_gc)
+      p%E=0d0; p%mu=0d0; p%q=int(0,kind=1);
+      type is (particle_gc_vpar)
+      p%vpar=0d0; p%mu=0d0; p%B_norm=0d0; p%q=int(0,kind=1);
+      type is (particle_gc_Qin)
+      p%vpar=0d0;    p%mu=0d0;      p%q=int(0,kind=1); p%B_norm=0d0; p%x_m=0d0; p%vpar_m=0d0;
+      p%Astar_m=0d0; p%Astar_k=0d0; p%dAstar_k=0d0;    p%Bn_k=0d0;   p%dBn_k=0d0;
+      p%Bnorm_k=0d0; p%E_k=0d0;
+      type is (particle_kinetic)
+      p%v=0d0; p%q=int(0,kind=1);
+      type is (particle_kinetic_leapfrog) 
+      p%v=0d0; p%q=int(0,kind=1);
+      type is (particle_kinetic_relativistic)
+      p%p=0d0; p%q=int(0,kind=1);
+      type is (particle_gc_relativistic)
+      p%p=0d0; p%q=int(0,kind=1);
+      end select   
   enddo
   !$omp end parallel do
 end subroutine initialize_particle_list_to_zero
