@@ -31,7 +31,7 @@ module phys_module
   real*8  :: TiTe_ratio           !< ratio to set ion and electron temperature from T (in model 180): Ti=TiTe_ratio*T; Te=(1.0-TiTe_ratio)*T
   real*8  :: F0                   !< Determines fixed toroidal magnetic field: \f$ B_\phi = F_0/R \f$
   real*8  :: central_density      !< particle density at the magnetic axis (in units of \f$10^{20} m^{-3}\f$)
-  real*8  :: central_mass         !< average ion mass in atomic mass units (constant in time and space)
+  real*8  :: central_mass         !< average ion mass in atomic mass units (constant in time and space, including electron mass)
   real*8  :: sqrt_mu0_rho0        !< Normalization factor \f$\sqrt(\mu_0 \rho_0)\f$ calculated from input
   real*8  :: sqrt_mu0_over_rho0   !< Normalization factor \f$\sqrt(\mu_0/\rho_0)\f$ calculated from input
   real*8  :: gamma                !< ratio of specific heat (typically 5/3)
@@ -79,6 +79,7 @@ module phys_module
   real*8  :: Z_xpoint_limit(2)    !< Search the lower X-point in the region Z < Z_xpoint_limit(1) and the upper X-point in the region Z > Z_xpoint_limit(2) 
   integer :: xpoint_search_tries  !< The number of candidate elements to check for being the element containing the upper or lower X-point.
   logical :: bootstrap            !< Evolve the Bootstrap current consistently with time?
+  real*8  :: bootstrap_psin_cutoff!< Bootstrap-current hard cutoff if simulating X-point plasma.
   real*8  :: minRad               !< Approximation of minor radius for bootstrap current calculation
   logical :: refinement           !< Use mesh refinement? (not presently available)
   logical :: force_central_node   !< Force all nodes in the center to have the same values in flux aligned grids or independent values?
@@ -137,6 +138,9 @@ module phys_module
   logical :: use_mumps_eq         !< Use Mumps equilibrium solver
   logical :: use_pastix_eq        !< Use Pastix equilibrium solver
   logical :: use_strumpack_eq     !< Use Strumpack equilibrium solver  
+  logical :: use_mumps_prj        !< Use Mumps projection solver
+  logical :: use_pastix_prj       !< Use Pastix projection solver
+  logical :: use_strumpack_prj    !< Use Strumpack projection solver  
   logical :: use_wsmp             !< Use WSMP solver
   logical :: centralize_harm_mat  !< Centralize harmonic matrices on toridal master ranks; switch for STRUMPACK solver
   real*8  :: prev_FB_fact = 1.d0  !< FB_factor that had been applied when importing the restart file
@@ -217,6 +221,10 @@ module phys_module
    
   ! Stellarator parameters
   logical :: gvec_grid_import     !< Generate grid fourier representation with GVEC
+  logical :: extended_boundary    !< Choose if extended boundary conditions (Biot-Savart version) should be used, default (false) is grad_chi with Dommaschk potentials
+  real*8  :: j_cutoff_rcoord      !< Radial location from which the current is set to zero as it approaches the boundary - rcoord corresponds to the normalised toroidal flux
+  real*8  :: j_cutoff_sig         !< Radial width over which the current is ramped down to zero towards the boundary
+  real*8  :: bloating_factor      !< Linear radial factor by which the boundary has been bloated/extended. The LCFS should be at rcoord=1/(bloating_factor).
 
   !> Points used as blocks to extend grid into complex wall structures, see https://www.jorek.eu/wiki/doku.php?id=wallgrid_tutorial
   real*8  :: surface_cross_tol                                                  !< Tolerance when looking for crossing of polar lines and surfaces, needs to be > 1.0
@@ -306,6 +314,9 @@ module phys_module
              ZK_i_perp_num_tanh, ZK_i_perp_num_tanh_psin, ZK_i_perp_num_tanh_sig,    &
              ZK_e_perp_num_tanh, ZK_e_perp_num_tanh_psin, ZK_e_perp_num_tanh_sig
   real*8  :: Dn_perp_num
+  logical :: maintain_profiles             !< Add artificial sources to maintain initial rho and T profiles
+                                           !! (diffusion acts on deviation from initial profiles)
+					   !! at present only implemented for stellarator model 183
 
   !> @name Shock-capturing terms
   logical :: use_sc  !< Use shock-capturing stabilization
@@ -510,9 +521,11 @@ module phys_module
   real*8, allocatable  :: xtime_spi_ablation_rate(:,:)    !< The time history of SPI ablation rate
   real*8, allocatable  :: xtime_spi_ablation_bg(:,:)      !< The time history of SPI ablation for background species
   real*8, allocatable  :: xtime_spi_ablation_bg_rate(:,:) ! <The time history of SPI ablation rate for bg species
+  logical              :: spi_abl_history_old        !< If this is .t., convert the old spi_abl_history format to the new one upon restart.
 
-  real*8, allocatable  :: xtime_radiation(:)    !< The time history of radiated energy in SI unit
-  real*8, allocatable  :: xtime_rad_power(:)    !< The time history of radiated power in SI unit
+  real*8, allocatable  :: xtime_radiation(:)         !< The time history of radiated energy in SI unit
+  real*8, allocatable  :: xtime_rad_power(:)         !< The time history of radiated power in SI unit
+  real*8, allocatable  :: xtime_rad_cooling_power(:) !< The time history of radiative power loss from plasma in SI unit
 
   real*8, allocatable  :: xtime_E_ion(:)        !< The time history of the ionization potential energy in SI unit
   real*8, allocatable  :: xtime_E_ion_power(:)  !< Time derivative of xtime_E_ion
@@ -531,6 +544,7 @@ module phys_module
   character(len=256) :: spi_shard_file(n_inj_max)!< The name of the shard size file
   character(len=256) :: spi_plume_file(n_inj_max)!< The name of the shard information datafile (array)
   logical            :: spi_plume_hdf5           !< if 'spi_plume_file' is in HDF5format?
+  logical            :: spi_abl_mag_reduction    !< Whether to use the magnetic reduction effect described in Eq.(27) of Nucl. Fusion 60 066027
 
   integer :: n_adas             !< Number of species to be traced by ADAS
 
@@ -616,7 +630,8 @@ module phys_module
   integer :: n_up_leg_out      !< Number of 'poloidal' grid points along the divertor legs on the top on the LFS (upper Xpoint or double-null)
   integer :: n_ext             !< Number of 'radial' grid points from the outermost flux surface to wall)
   logical :: n_tht_equidistant !< switch on to get an equidistant poloidal distribution of elements in the core of the grid (psi<0.5)
-  real*8  :: SIG_closed        !< Width with grid accumulation (for flux-aligned grid)
+  real*8  :: xr_closed(3)      !< Location for grid accumulation (for flux-aligned grid)
+  real*8  :: SIG_closed(3)     !< Width with grid accumulation (for flux-aligned grid)
   real*8  :: SIG_open          !< Width with grid accumulation (for flux-aligned grid)
   real*8  :: SIG_outer         !< Width with grid accumulation (for flux-aligned grid)
   real*8  :: SIG_inner         !< Width with grid accumulation (for flux-aligned grid)
@@ -637,6 +652,11 @@ module phys_module
   !> @name Analytical heat, particle and neutral particles diffusivity parameters
   real*8  :: D_perp(10)    = 0.d0 !< Coefficients for perpendicular particle diffusion profile
   real*8  :: D_par                !< Parallel particle diffusion (usually not useful)
+  real*8  :: V_pinch_gauss = 0.d0 !< Amplitude of Gaussian inward pinch velocity profile for background fluid (rho only).
+                                  !< Profile: V_pinch_gauss * exp(-(psin - V_pinch_psin)^2 / V_pinch_sig^2).
+                                  !< Positive = inward (toward magnetic axis). Units: JOREK velocity = V_SI[m/s] * sqrt(mu0*rho0).
+  real*8  :: V_pinch_psin  = 0.d0 !< Centre of V_pinch Gaussian in normalised poloidal flux (psin).
+  real*8  :: V_pinch_sig   = 1.d0 !< Width (sigma) of V_pinch Gaussian in psin units.
   real*8  :: D_perp_imp(10)= 0.d0 !< Coefficients for perpendicular imp particle diffusion profile
   real*8  :: D_par_imp            !< Parallel impurity particle diffusion (usually not useful)
   real*8  :: ZK_perp(10)   = 0.d0 !< Coefficients for perpendicular heat diffusion profile
@@ -664,16 +684,19 @@ module phys_module
   character(len=512)  :: zk_perp_file       !< ASCII file with perpendicular heat diffusion profile
   character(len=512)  :: zk_e_perp_file     !< ASCII file with perpendicular electron heat diffusion profile
   character(len=512)  :: zk_i_perp_file     !< ASCII file wtih perpendicular ion heat diffusion profile
+  character(len=512)  :: v_pinch_file       !< ASCII file with inward pinch velocity profile (psin, V_pinch columns)
   logical             :: num_d_perp         !< automatically set true if d_perp_file /= 'none'
   logical             :: num_d_perp_imp     !< automatically set true if d_perp_file /= 'none'
   logical             :: num_zk_perp        !< automatically set true if zk_perp_file /= 'none'
   logical             :: num_zk_e_perp      !< automatically set true if zk_e_perp_file /= 'none'
   logical             :: num_zk_i_perp      !< automatically set true if zk_i_perp_file /= 'none'
+  logical             :: num_v_pinch        !< automatically set true if v_pinch_file /= 'none'
   integer             :: num_d_perp_len     !< Number of datapoints in d_perp profile
   integer             :: num_d_perp_len_imp !< Number of datapoints in d_perp profile for impurity
   integer             :: num_zk_perp_len    !< Number of datapoints in zk_perp profile
   integer             :: num_zk_e_perp_len  !< Number of datapoints in zk_e_perp profile
   integer             :: num_zk_i_perp_len  !< Number of datapoints in zk_i_perp profile
+  integer             :: num_v_pinch_len    !< Number of datapoints in v_pinch profile
   real*8, allocatable :: num_d_perp_x(:)    !< Psi_N values of d_perp  profile
   real*8, allocatable :: num_d_perp_y(:)    !< D_perp values of d_perp profile
   real*8, allocatable :: num_d_perp_x_imp(:)!< Psi_N values of d_perp  profile for impurity
@@ -684,6 +707,8 @@ module phys_module
   real*8, allocatable :: num_zk_e_perp_y(:) !< ZK_perp values of zk_e_perp profile
   real*8, allocatable :: num_zk_i_perp_x(:) !< Psi_N values of zk_i_perp profile
   real*8, allocatable :: num_zk_i_perp_y(:) !< ZK_perp values of zk_i_perp profile
+  real*8, allocatable :: num_v_pinch_x(:)   !< Psi_N values of v_pinch profile
+  real*8, allocatable :: num_v_pinch_y(:)   !< V_pinch values of v_pinch profile
   
   !> @name Analytical input profile for the density
   real*8  :: rho_0             !< Central normalized density (usually 1)
@@ -961,6 +986,7 @@ module phys_module
   real*8  :: D_neutral
 
   !> @name Particles-related input parameters
+  logical :: use_particles       ! Flag if simulation contains particles
   integer :: n_aux_var = n_var   ! number of variables in aux_node_list (= n_var is temporary)
   integer :: n_diag_var = n_var  ! number of variables in diag_node_list (= n_var is temporary)
   logical :: restart_particles
@@ -1012,7 +1038,8 @@ module phys_module
   !> @name Manual setting of random seed (for testing)
   logical :: use_manual_random_seed                   !< whether the random seed should be manually set
   integer :: manual_seed                              !< the manually set seed value
-
+  logical :: use_fixed_rng_value                      !< forcibly set all rng outputs to return a specific value (set by fixed_rng_value, use this for debugging and testing only)
+  real*8  :: fixed_rng_value                          !< the value the fixed rng is set to when using use_fixed_rng_value
   contains
   
 end module phys_module

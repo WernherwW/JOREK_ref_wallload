@@ -187,7 +187,7 @@ program JOREK2
   res = 0.d0   
     
   !***********************************************************************
-  !*                  intialisation                                      *
+  !*                  initialisation                                      *
   !***********************************************************************
 
   ! --- Initialize OpenMP threads before MPI_init
@@ -307,7 +307,8 @@ mpi_required = 0
       write(*,*) 'WARNING: Axis treatments set via input file is not the same as that in the restart file.'
       write(*,*) 'You are trying to restart the simulation with treat_axis = ', input_treat_axis
       write(*,*) 'Earlier treat_axis was set to = ', treat_axis
-      write(*,*) 'STOP' 
+      write(*,*) 'STOP'
+      call MPI_Abort(MPI_COMM_WORLD, 29, IERR)
       stop      
     endif
 
@@ -336,7 +337,7 @@ mpi_required = 0
             call grid_double_xpoint(node_list, element_list)
           endif
         else
-	  call grid_xpoint(node_list,element_list,n_flux,n_open,n_private,n_leg,n_tht,  &
+	  call grid_xpoint(node_list,element_list,n_flux,n_open,n_private,n_leg,n_tht,xr_closed,  &
                            SIG_open,SIG_closed,SIG_private,SIG_theta,SIG_leg_0,SIG_leg_1,dPSI_open,dPSI_private, xcase)
         endif
       else
@@ -373,7 +374,14 @@ mpi_required = 0
     call init_node_list(node_list, n_nodes_max, node_list%n_dof, n_var)
 
 #if JOREK_MODEL == 180
-    call initialise_equilibrium(my_id,node_list,element_list,bnd_node_list, bnd_elm_list)
+    call initialise_equilibrium(my_id,node_list,element_list,bnd_node_list, bnd_elm_list, ierr)
+    if (ierr == 3) then
+      write(fileout,rst_file_ind_fmt(1)) 'jorek',0
+      call export_restart(node_list, element_list, fileout)
+      write(*,*) 'Restart file created, aborting.'
+      call MPI_Abort(MPI_COMM_WORLD, 3, ierr)
+      stop
+    end if
 #else
     if_not_regrid_from_rz: if(.not. regrid_from_rz) then
       
@@ -498,7 +506,6 @@ if ( freeboundary ) then
   call update_response(my_id,tstep,  resistive_wall)
   call import_external_fields('coil_field.dat', my_id)
   call set_coil_curr_time_trace()
-  call read_Z_axis_profile() 
   if ( (.not. restart) .or. (.not. wall_curr_initialized) ) call init_wall_currents(my_id, resistive_wall)
 end if
   
@@ -537,7 +544,10 @@ write(*,*) "n elements:", element_list%n_elements
   ! --- from the previous time-step, which is only read by my_id=0 from the restart file
   call broadcast_equil_state(my_id)                           ! equil_state
 
-  if ( freeboundary ) call broadcast_vacuum(my_id, resistive_wall)
+  if ( freeboundary ) then
+     call broadcast_vacuum(my_id, resistive_wall)
+     call read_Z_axis_profile()
+  end if
 
   mhd_sim%my_id = my_id
   mhd_sim%n_cpu = n_cpu
@@ -620,7 +630,7 @@ write(*,*) "n elements:", element_list%n_elements
   ! --- Export a restart file before the first timestep
   if ( (my_id == 0) .and. (.not. restart) ) then
     if ( freeboundary .and. freeb_change_indices ) call exchange_indices(node_list, my_id, n_cpu, .true.)
-    fileout = 'jorek00000'
+    write(fileout,rst_file_ind_fmt(1)) 'jorek',0
     call export_restart(node_list, element_list, fileout)
     if ( freeboundary .and. freeb_change_indices ) call exchange_indices(node_list, my_id, n_cpu, .false.)
   end if
@@ -719,7 +729,7 @@ write(*,*) "n elements:", element_list%n_elements
     call construct_matrix(mhd_sim, mhd_sim%local_elms, mhd_sim%n_local_elms, a_mat, rhs_vec, harmonic_matrix=.false.)
   
     call clck_time_barrier(t1); call clck_ldiff(t0,t1,tsecond)
-    if (my_id.eq.0) write(*,FMT_TIMING) my_id, '# Elapsed time in construct global matrix :',tsecond
+    if (my_id.eq.0) write(*,FMT_TIMING) my_id, '# Elapsed time construct global matrix: ',tsecond
       
     solver%tstep = tstep
     solver%istep = istep
@@ -843,7 +853,7 @@ write(*,*) "n elements:", element_list%n_elements
 #endif
 
        ! --- Output some information about the current timestep
-       130 format(1x,a,i5.5,a,es10.3,a)
+       130 format(1x,a,i6.6,a,es10.3,a)
        131 format(1x,a,2(2(es10.2,' ...',es10.2,',')))
        132 format(1x,'-------------------------------------------------------------------')
        133 format(1x,a,2(es10.2,' at ',i10,','))
@@ -912,7 +922,7 @@ write(*,*) "n elements:", element_list%n_elements
     ! --- Write a restart file every nout timesteps
     if ( (my_id == 0) .and. (mod(index_now,nout) == 0) ) then
       if ( freeboundary .and. freeb_change_indices ) call exchange_indices(mhd_sim%node_list, my_id, n_cpu, .true.)
-      write(fileout,'(A5,i5.5)') 'jorek',index_now
+      write(fileout,rst_file_ind_fmt(1)) 'jorek',index_now
       call export_restart(mhd_sim%node_list, mhd_sim%element_list, fileout)
       if ( freeboundary .and. freeb_change_indices ) call exchange_indices(mhd_sim%node_list, my_id, n_cpu, .false.)
     endif

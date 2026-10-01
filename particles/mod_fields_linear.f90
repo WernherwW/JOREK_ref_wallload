@@ -9,6 +9,7 @@ use mod_interp
 implicit none
 private
 public jorek_fields_interp_linear, read_jorek_fields_interp_linear, last_file_before_time
+public find_jorek_restart_file
 
 !> Action to read in the fields into sim%fields
 type, extends(action) :: read_jorek_fields_interp_linear
@@ -45,7 +46,7 @@ contains
 !> Interpolate a variable at a specific position (with phi), with first derivatives only
 pure subroutine do_interp_PRZ_1(this, time, i_elm, i_v, n_v, s, t, phi, P, P_s, P_t, P_phi, P_time, R, R_s, R_t, Z, Z_s, Z_t)
   use mod_interp
-  use constants, only: mu_zero, mass_proton
+  use constants, only: mu_zero, atomic_mass_unit
   use phys_module, only: tstep, central_mass, central_density
   use mod_linear, only: linear_interp_differentials
   use mod_linear, only: linear_interp_differentials_dt
@@ -62,7 +63,7 @@ pure subroutine do_interp_PRZ_1(this, time, i_elm, i_v, n_v, s, t, phi, P, P_s, 
   real*8                 :: t_jorek
   
   ! JOREK time step in seconds
-  t_jorek = tstep*sqrt(mu_zero * mass_proton * central_mass * central_density * 1.d20)
+  t_jorek = tstep*sqrt(mu_zero * ATOMIC_MASS_UNIT * central_mass * central_density * 1.d20)
 
   P_time = 0.d0
   
@@ -117,7 +118,7 @@ pure subroutine do_interp_PRZ_2(this,time,i_elm,i_v,n_v,s,t,phi, &
   P_ttime,R,R_s,R_t,R_ss,R_st,R_tt,Z,Z_s,Z_t,Z_ss,Z_st,Z_tt)
   !> load module and functions
   use mod_interp
-  use constants, only: mu_zero,mass_proton
+  use constants, only: mu_zero,atomic_mass_unit
   use phys_module, only: tstep,central_mass,central_density
   use mod_linear, only: linear_interp_differentials
   use mod_linear, only: linear_interp_differentials_dt
@@ -143,7 +144,7 @@ pure subroutine do_interp_PRZ_2(this,time,i_elm,i_v,n_v,s,t,phi, &
   real(kind=8), dimension(n_v) :: dP_sphi, dP_tphi, dP_phiphi
   
   ! JOREK time step in seconds
-  t_jorek = tstep*sqrt(mu_zero*central_density*mass_proton*central_mass*1.d20)
+  t_jorek = tstep*sqrt(mu_zero*central_density*ATOMIC_MASS_UNIT*central_mass*1.d20)
 
   P_time = 0.d0
   P_stime = 0.d0
@@ -190,7 +191,7 @@ end subroutine do_interp_PRZ_2
 !> Interpolate a variable at a specific position (with phi), with first derivatives only, including phi derivatives
 pure subroutine do_interp_PRZP_1(this, time, i_elm, i_v, n_v, s, t, phi, P, P_s, P_t, P_phi, P_time, R, R_s, R_t, R_phi, Z, Z_s, Z_t, Z_phi)
   use mod_interp
-  use constants, only: mu_zero, mass_proton
+  use constants, only: mu_zero, atomic_mass_unit
   use phys_module, only: tstep, central_mass, central_density
   use mod_linear, only: linear_interp_differentials
   use mod_linear, only: linear_interp_differentials_dt
@@ -207,7 +208,7 @@ pure subroutine do_interp_PRZP_1(this, time, i_elm, i_v, n_v, s, t, phi, P, P_s,
   real*8                 :: t_jorek
   
   ! JOREK time step in seconds
-  t_jorek = tstep*sqrt(mu_zero * mass_proton * central_mass * central_density * 1.d20)
+  t_jorek = tstep*sqrt(mu_zero * ATOMIC_MASS_UNIT * central_mass * central_density * 1.d20)
 
   P_time = 0.d0
   
@@ -254,6 +255,33 @@ function new_read_jorek_fields_interp_linear(basename, i, rst_format, stop_at_en
 end function new_read_jorek_fields_interp_linear
 
 
+!> Build the name of the JOREK restart file belonging to step index i.
+!> Every supported index format is tried (6 digits first, then 5 digits), so
+!> that restart files written by older versions of JOREK are found as well.
+!> If no matching file exists, the name in the default (6-digit) format is
+!> returned, so that the caller can report it in an error message.
+function find_jorek_restart_file(basename, i) result(restart_file)
+  use mod_import_restart, only: rst_file_ind_fmt
+  character(len=*), intent(in) :: basename
+  integer,          intent(in) :: i
+  character(len=80) :: restart_file
+  character(len=80) :: tmp_name
+  integer :: i_fmt
+  logical :: file_exists
+
+  do i_fmt=1,size(rst_file_ind_fmt)
+    write(tmp_name,rst_file_ind_fmt(i_fmt)) trim(basename), i
+    restart_file = trim(tmp_name)//'.h5'
+    inquire(file=trim(restart_file), exist=file_exists)
+    if (file_exists) return
+  end do
+
+  ! Nothing found: fall back to the default format for the error message
+  write(tmp_name,rst_file_ind_fmt(1)) trim(basename), i
+  restart_file = trim(tmp_name)//'.h5'
+end function find_jorek_restart_file
+
+
 !> Find the number of the latest restart file < time (SI units)
 !> Perform a bisection method of all the jorek$num.h5 files in the directory
 !> Perhaps better to use xtime if this is always present, combined with a filter
@@ -264,21 +292,26 @@ function last_file_before_time(time) result(file_number)
   real*8, intent(in) :: time
   integer :: file_number
   integer :: i, ierr, my_id, u
-  character(len=5) :: my_id_s, num_s
+  character(len=5) :: my_id_s
   integer, dimension(:), allocatable :: filenums_tmp, filenums
   integer :: n, i_lower, i_guess, i_upper, io
   real*8 :: t_norm, t_lower, t_guess, t_upper
 
   call MPI_COMM_RANK(MPI_COMM_WORLD, my_id, ierr)
-  t_norm = sqrt(mu_zero * mass_proton * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
+  t_norm = sqrt(mu_zero * ATOMIC_MASS_UNIT * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
   if (my_id .eq. 0) then
     write(*,*) "Looking for jorek restart file just before time ", time
 
-    ! Get list of filenumbers
+    ! Get list of filenumbers. The number of digits of the step index is not
+    ! fixed: older restart files use 5 digits, newer ones 6, so take whatever
+    ! sits between the basename and the extension. Sort numerically (not in the
+    ! lexicographic order of ls), since the bisection below needs the step
+    ! indices in increasing order even if both digit formats are present.
     write(my_id_s,"(i0.5)") my_id
-    call execute_command_line("ls jorek[0-9]*.h5 | grep -o '[0-9]\{5\}' > .jorek_filenums."//my_id_s)
+    call execute_command_line("ls jorek[0-9]*.h5 | sed -n 's/^jorek\([0-9]*\)\.h5$/\1/p'"// &
+      " | sort -nu > .jorek_filenums."//my_id_s)
     open(newunit=u,file=".jorek_filenums."//my_id_s)
-    allocate(filenums_tmp(100000)) ! assumes 5-digit numbers
+    allocate(filenums_tmp(100000)) ! maximum number of restart files handled
     n=0
     do i=1,100000
       read(u,*,iostat=io) filenums_tmp(i)
@@ -293,42 +326,45 @@ function last_file_before_time(time) result(file_number)
     if (n .le. 0) then
       write(*,*) "No files found!"
       file_number = 0
-      return
-    end if
+    else
+      ! Bracket the requested time by the first and the last restart file
+      i_lower = 1 ! index into filenumber array
+      t_lower = get_jorek_hdf5_time(find_jorek_restart_file('jorek',filenums(i_lower)))*t_norm
+      i_upper = n
+      t_upper = get_jorek_hdf5_time(find_jorek_restart_file('jorek',filenums(i_upper)))*t_norm
 
-    ! Calculate upper and lower bounds
-    i_lower = 1 ! index into filenumber array
-    write(num_s,'(i0.5)') filenums(i_lower)
-    t_lower = get_jorek_hdf5_time('jorek'//num_s//'.h5')*t_norm
-    i_upper = n
-    write(num_s,'(i0.5)') filenums(i_upper)
-    t_upper = get_jorek_hdf5_time('jorek'//num_s//'.h5')*t_norm
-    i_guess = nint((time-t_lower)/(t_upper-t_lower)*real(i_upper - i_lower)) + i_lower
-
-    do i=1,20
-      if (i_guess .le. 1 .or. i_guess .gt. n) then
-        if (my_id .eq. 0) write(*,*) "ERROR: requested time out of range"
-        exit
-      end if
-      if (i_guess .eq. i_lower .or. i_guess .eq. i_upper) exit
-
-      write(num_s,'(i0.5)') filenums(i_guess)
-      t_guess = get_jorek_hdf5_time('jorek'//num_s//'.h5')*t_norm
-      if (my_id .eq. 0) write(*,"(i5,A,g14.7,A,i5,A,g14.7,A,i5,A,g14.7,A)") i_lower, " (", t_lower, &
-        ")    ", i_guess, " (", t_guess, &
-        ")    ", i_upper, " (", t_upper, ")    "
-      ! Based on the value of t_guess, replace either the lower or upper bound
-      if (t_guess .le. time) then
-        t_lower = t_guess
-        i_lower = i_guess
+      if (time .lt. t_lower) then
+        ! Requested time lies before the first restart file
+        write(*,*) "WARNING: requested time ", time, " [s] lies before the first restart file at ", &
+          t_lower, " [s]. Using the first restart file."
+      else if (time .ge. t_upper) then
+        ! Requested time lies at or after the last restart file
+        i_lower = i_upper
+        t_lower = t_upper
       else
-        t_upper = t_guess
-        i_upper = i_guess
+        ! Bisect while maintaining the invariant t(i_lower) <= time < t(i_upper),
+        ! until the two bounds are neighbours in the list of restart files
+        do while (i_upper - i_lower .gt. 1)
+          i_guess = (i_lower + i_upper)/2
+          t_guess = get_jorek_hdf5_time(find_jorek_restart_file('jorek',filenums(i_guess)))*t_norm
+          write(*,"(i5,A,g14.7,A,i5,A,g14.7,A,i5,A,g14.7,A)") i_lower, " (", t_lower, &
+            ")    ", i_guess, " (", t_guess, &
+            ")    ", i_upper, " (", t_upper, ")    "
+          ! Based on the value of t_guess, replace either the lower or upper bound
+          if (t_guess .le. time) then
+            t_lower = t_guess
+            i_lower = i_guess
+          else
+            t_upper = t_guess
+            i_upper = i_guess
+          end if
+        end do
       end if
-      i_guess = i_lower + (i_upper-i_lower)/2
-    end do
-    file_number = filenums(i_lower)
-    write(*,"(A,i5,A,g14.7,A,g14.7,A)") 'Selected ', i_lower, " (", t_lower, ') as last file before (', time, ')'
+
+      file_number = filenums(i_lower)
+      write(*,"(A,i5,A,i7,A,g14.7,A,g14.7,A)") 'Selected ', i_lower, ' (file index ', file_number, &
+        ', t = ', t_lower, ') as last file before (', time, ')'
+    end if
   end if
   call MPI_Bcast(file_number, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
 end function last_file_before_time
@@ -341,8 +377,18 @@ function get_jorek_hdf5_time(filename) result(time)
   real*8 :: time
   integer(HID_T) :: file
   integer :: hdferr
+  logical :: file_exists
+  inquire(file=trim(filename), exist=file_exists)
+  if (.not. file_exists) then
+    write(*,*) "ERROR: cannot read the time from restart file ", trim(filename), " which does not exist"
+    call exit(1)
+  end if
   call h5open_f(hdferr)
   call h5fopen_f(filename, H5F_ACC_RDONLY_F, file, hdferr)
+  if (hdferr .ne. 0) then
+    write(*,*) "ERROR: cannot open restart file ", trim(filename)
+    call exit(1)
+  end if
   call HDF5_real_reading(file,time,'/t_now')
   call h5fclose_f(file,hdferr)
   call h5close_f(hdferr)
@@ -365,7 +411,7 @@ subroutine do_read(this, sim, ev)
   logical :: file_exists, next_file_found
 
   real*8 :: t_norm
-  t_norm = sqrt(mu_zero * mass_proton * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
+  t_norm = sqrt(mu_zero * ATOMIC_MASS_UNIT * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
 
   call MPI_COMM_RANK(MPI_COMM_WORLD, my_id, ierr)
 
@@ -396,7 +442,7 @@ subroutine do_read(this, sim, ev)
         if (this%i .eq. -1) then
           write(restart_file,'(A,A)') trim(this%basename), '_restart.h5'
         else
-          write(restart_file,'(A,i5.5,A)') trim(this%basename), this%i, '.h5'
+          restart_file = find_jorek_restart_file(this%basename, this%i)
         end if
         inquire(file=trim(restart_file), exist=file_exists)
         if (file_exists) then
@@ -428,7 +474,7 @@ subroutine do_read(this, sim, ev)
       else ! Linearly interpolating case
         ! If nothing has been loaded (i.e. fields%time_prev = 0.d0) load the initial file
         if (abs(f%time_prev) .lt. 1.d-50) then
-          write(restart_file,'(A,i5.5,A)') trim(this%basename), this%i, '.h5'
+          restart_file = find_jorek_restart_file(this%basename, this%i)
           inquire(file=trim(restart_file), exist=file_exists)
           if (file_exists) then
             call import_hdf5_restart(f%node_list,f%element_list,trim(restart_file),this%rst_format,ierr)
@@ -455,8 +501,8 @@ subroutine do_read(this, sim, ev)
         
         ! Find the following file (next timestep number)
         next_file_found=.false.
-        do i=this%i+1,this%i+20 ! check 20 files ahead
-          write(restart_file,'(A,i5.5,A)') trim(this%basename), i, '.h5'
+        do i=this%i+1,this%i+200 ! check 200 files ahead
+          restart_file = find_jorek_restart_file(this%basename, i)
           inquire(file=trim(restart_file), exist=file_exists)
           if (file_exists) then
             next_file_found=.true.

@@ -180,6 +180,13 @@ write(*,'(1x,a)',advance='no') ' USE_CATALYST : '
   write(*,*) 'off'
 #endif
 
+write(*,'(1x,a)',advance='no') ' USE_DOMM            : '
+#ifdef USE_DOMM
+  write(*,*) 'on  (Dommaschk-only vacuum field, no FE correction)'
+#else
+  write(*,*) 'off (GVEC import + FE correction for vacuum field)'
+#endif
+
   write(*,*)
   write(*,200)
   write(*,*) '* Hard-Coded Parameters:                                                      *'
@@ -292,6 +299,7 @@ write(*,'(1x,a)',advance='no') ' USE_CATALYST : '
     write(*,INTG_FMT) 'n_up_priv             ', n_up_priv
     write(*,INTG_FMT) 'n_up_leg              ', n_up_leg
     write(*,INTG_FMT) 'n_up_leg_out          ', n_up_leg_out
+    write(*,REAL_FMT) 'xr_closed             ', xr_closed
     write(*,REAL_FMT) 'SIG_closed            ', SIG_closed
     write(*,REAL_FMT) 'SIG_open              ', SIG_open
     write(*,REAL_FMT) 'SIG_private           ', SIG_private
@@ -418,6 +426,10 @@ write(*,'(1x,a)',advance='no') ' USE_CATALYST : '
     write(*,CHAR_FMT) 'domm_file             ', domm_file
     write(*,REAL_FMT) 'R_domm                ', R_domm
   end if
+  write(*,LOGI_FMT) 'extended_boundary     ', extended_boundary
+  write(*,REAL_FMT) 'j_cutoff_rcoord       ', j_cutoff_rcoord
+  write(*,REAL_FMT) 'j_cutoff_sig          ', j_cutoff_sig
+  write(*,REAL_FMT) 'bloating_factor       ', bloating_factor
 
   if ( (abs(V_0) .ge. 1.d-19) .or. (num_rot) ) then
      write(*,LOGI_FMT) 'normalized_velocity_profile', normalized_velocity_profile
@@ -517,6 +529,13 @@ write(*,'(1x,a)',advance='no') ' USE_CATALYST : '
     write(*,CHAR_FMT) 'D_perp_imp_file       ', trim(D_perp_imp_file)
   end if
 #endif
+  if ( num_v_pinch ) then
+    write(*,CHAR_FMT) 'v_pinch_file          ', trim(v_pinch_file)
+  else
+    write(*,REAL_FMT) 'V_pinch_gauss         ', V_pinch_gauss
+    write(*,REAL_FMT) 'V_pinch_psin          ', V_pinch_psin
+    write(*,REAL_FMT) 'V_pinch_sig           ', V_pinch_sig
+  end if
   write(*,REAL_FMT) 'particlesource        ', particlesource
   write(*,REAL_FMT) 'particlesource_psin   ', particlesource_psin
   write(*,REAL_FMT) 'particlesource_sig    ', particlesource_sig
@@ -823,6 +842,9 @@ write(*,'(1x,a)',advance='no') ' USE_CATALYST : '
   write(*,LOGI_FMT) 'use_mumps_eq          ', use_mumps_eq
   write(*,LOGI_FMT) 'use_pastix_eq         ', use_pastix_eq
   write(*,LOGI_FMT) 'use_strumpack_eq      ', use_strumpack_eq  
+  write(*,LOGI_FMT) 'use_mumps_prj         ', use_mumps_prj
+  write(*,LOGI_FMT) 'use_pastix_prj        ', use_pastix_prj
+  write(*,LOGI_FMT) 'use_strumpack_prj     ', use_strumpack_prj
   write(*,REAL_FMT) 'pastix_pivot          ', pastix_pivot
   write(*,INTG_FMT) 'pastix_maxthrd        ', pastix_maxthrd
   write(*,LOGI_FMT) 'refinement            ', refinement
@@ -896,6 +918,7 @@ write(*,'(1x,a)',advance='no') ' USE_CATALYST : '
   endif
   write(*,LOGI_FMT) 'output_bnd_elements   ', output_bnd_elements
   write(*,LOGI_FMT) 'bootstrap             ', bootstrap
+  write(*,REAL_FMT) 'bootstrap_psin_cutoff ', bootstrap_psin_cutoff
   write(*,LOGI_FMT) 'NEO                   ', NEO
   if (NEO) then
     write(*,LOGI_FMT) 'num_neo_file          ', num_neo_file
@@ -967,6 +990,7 @@ write(*,'(1x,a)',advance='no') ' USE_CATALYST : '
        write(*,CHAR_FMT2) 'spi_plume_file(',i,')    ',  trim(spi_plume_file(i))
      end do
      write(*,LOGI_FMT) 'spi_plume_hdf5      ',  spi_plume_hdf5
+     write(*,LOGI_FMT) 'spi_abl_mag_reduction',  spi_abl_mag_reduction
      write(*,INTG_FMT) 'spi_rnd_seed        ',  spi_rnd_seed
      write(*,INTG_FMT) 'spi_abl_model       ',  spi_abl_model
      do i = 1,n_inj
@@ -1042,6 +1066,10 @@ write(*,'(1x,a)',advance='no') ' USE_CATALYST : '
   if (use_manual_random_seed) then
     write(*,INTG_FMT) 'manual_seed,             ',manual_seed
   endif     
+  write(*,LOGI_FMT) 'use_fixed_rng_value,    ',use_fixed_rng_value
+  if (use_fixed_rng_value) then
+    write(*,REAL_FMT) 'fixed_rng_value,        ',fixed_rng_value
+  endif
 
 #ifdef USE_CATALYST
   write(*,CHAR_FMT) 'catalyst_scripts,   ',trim(catalyst_scripts)

@@ -39,7 +39,8 @@ GCPP ?= cpp
 
 # Default flags for GCC
 ifeq ($(COMPILER_FAMILY), gnu)
-  FLAGS += -cpp -fopenmp
+  GCPP = $(FC) -cpp -E # use gfortran precompiler to generate dependencies with  __GFORTRAN__  flag
+  FLAGS += -cpp -fopenmp 
   FLAGS += -Wall -Wextra
   FLAGS += -Wno-unused-variable
   FFLAGS += -Wintrinsics-std
@@ -174,6 +175,12 @@ CGDEP= generate_code                         # Pre-compute analytic expressions 
 USE_DOMM ?= 1
 ifeq ($(USE_DOMM), 1)
   DEFINES := $(DEFINES) -DUSE_DOMM              # Use Dommaschk potentials, without FE correction of n.B on boundary 
+endif
+USE_EXT_FIELD ?= 0
+ifeq ($(USE_EXT_FIELD), 1)
+  ifeq ($(USE_DOMM), 0)                         # Should only be set if USE_DOMM=0
+    DEFINES := $(DEFINES) -DUSE_EXT_FIELD       # Use external magnetic field from gvec2jorek file
+  endif
 endif
 ifeq (model180, $(MODEL))
   DEFINES := $(DEFINES) -DSEMIANALYTICAL -DSTELLARATOR_MODEL

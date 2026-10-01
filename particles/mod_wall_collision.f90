@@ -73,7 +73,8 @@ type octree_node
    integer      :: depth         !< The depth of this node, for root depth = 1
    real(kind=8) :: boundary(2,3) !< [x_min, x_max; y_min, y_max, z_min, z_max] of the volume belonging this node
    type(octree_triangle), allocatable :: contained(:) !< Triangles contained within this node.
-   type(octree_node), pointer         :: children(:)  !< Child nodes this element has.
+   type(octree_node), pointer         :: children(:) => null() !< Child nodes this element has. Leaf nodes never
+                                                               !< assign this, so it must start out nullified.
 end type octree_node
 
 contains
@@ -135,6 +136,7 @@ subroutine mod_wall_collision_export(sim, file, iangle_groups)
 
         ! Collect wall IDs, weights, and evaluate energy. TODO add other particle types
         allocate( wall_id(n_here), weight(n_here), energy(n_here), iangle(n_here) )
+        energy = 0.d0 !< markers whose energy cannot be evaluated below must not contribute
         do k=1,n_here
            wall_id(k) = -sim%groups(i)%particles(k)%i_elm ! Assuming i_elm = - wall_id for markers that were lost.
            weight(k)  = sim%groups(i)%particles(k)%weight

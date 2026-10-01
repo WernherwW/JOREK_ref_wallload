@@ -86,7 +86,7 @@ contains
 !> in the jorek element `i_elm` at `st`.
 pure subroutine calc_EBpsiU(fields, time, i_elm, st, phi, E, B, psi, U)
   use phys_module, only: F0, mode, central_mass, central_density
-  use constants, only: mu_zero, mass_proton
+  use constants, only: mu_zero, atomic_mass_unit
   use mod_coordinate_transforms, only: transform_derivatives_st_to_RZ
   use mod_chi
   ! Routine parameters
@@ -116,7 +116,7 @@ pure subroutine calc_EBpsiU(fields, time, i_elm, st, phi, E, B, psi, U)
   real*8             :: psi_R, psi_Z, psi_phi, U_R, U_Z, U_phi, t_norm
   real*8, dimension(0:n_order-1,0:n_order-1,0:n_order-1) :: chi
 
-  t_norm  = sqrt(mu_zero * mass_proton * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
+  t_norm  = sqrt(mu_zero * ATOMIC_MASS_UNIT * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
 
   ! Interpolate the fields to get psi and U at the current position (and the
   ! changes u_n - u(n-1))
@@ -210,7 +210,7 @@ pure subroutine calc_F_profile(fields,i_elm,s,t,phi,Fprof)
   !Internal variables
   integer           :: i,j,i_tor, iv, i_harm
   real*8            :: Fprof_temp
-  real*8            :: H(4,4), H_s(4,4),H_t(4,4),ss
+  real*8            :: H(n_vertex_max,n_degrees), H_s(n_vertex_max,n_degrees),H_t(n_vertex_max,n_degrees),ss
 #ifdef fullmhd
   Fprof_temp=0.d0
   call basisfunctions3(s,t,H,H_s,H_t)
@@ -298,7 +298,7 @@ pure subroutine calc_NeTevpar(fields, time, i_elm, st, phi, n_e, T_e, vpar, grad
 #endif
   T_e = max(P(2)*T_norm, 1.d0) ! temperature capped against going negative
 
-  v_norm = 1.d0/sqrt(MU_ZERO*central_mass*central_density*1.d20*MASS_PROTON)
+  v_norm = 1.d0/sqrt(MU_ZERO*central_mass*central_density*1.d20*atomic_mass_unit)
   vpar = P(3)*v_norm !note that it should still be multiplied by the norm of the B field to be si
 
   if (present(grad_T_e)) then
@@ -374,7 +374,7 @@ end subroutine calc_NjTj
 !> Calculates the gyro-averaged electric fields from a set of particles (representing the gyro-orbit)
 pure subroutine calc_gyro_average_E(fields, time, particles, n_phases, E_average)
   use phys_module, only: F0, mode, central_mass, central_density
-  use constants, only: mu_zero, mass_proton
+  use constants, only: mu_zero, atomic_mass_unit
   use mod_particle_types
   ! Routine parameters
   class(fields_base), intent(in)             :: fields
@@ -394,7 +394,7 @@ pure subroutine calc_gyro_average_E(fields, time, particles, n_phases, E_average
 
   if (n_phases .lt. 1) return   ! return E_average as it was
 
-  t_norm  = sqrt(mu_zero * mass_proton * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
+  t_norm  = sqrt(mu_zero * ATOMIC_MASS_UNIT * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
 
   ! Interpolate the fields to get psi and U at the current position (and the
   ! changes u_n - u(n-1))
@@ -435,7 +435,7 @@ end subroutine calc_gyro_average_E
 ! May be To do: add diamagnetic drift component.
 subroutine calc_vvector(fields, time, i_elm, st, phi, vvector) 
 use phys_module, only: F0, mode, central_mass, central_density
-use constants, only: mu_zero, mass_proton
+use constants, only: mu_zero, atomic_mass_unit
 use mod_coordinate_transforms, only: transform_derivatives_st_to_RZ
 ! Routine parameters
 class(fields_base), intent(in) :: fields
@@ -457,7 +457,7 @@ real*8             :: R, R_s, R_t, Z, Z_s, Z_t
 real*8             :: inv_st_jac, R_inv
 real*8             :: psi_R, psi_Z, U_R, U_Z, U_phi, t_norm
 real*8             :: vpar, v_R, v_Z, v_phi
-t_norm  = sqrt(mu_zero * mass_proton * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
+t_norm  = sqrt(mu_zero * ATOMIC_MASS_UNIT * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
 
 ! Interpolate the fields to get psi and U at the current position (and the
 ! changes u_n - u(n-1))
@@ -489,14 +489,14 @@ pure function rot_tmp(x,A,dA) result(rotA)
   real*8, intent(in)  :: x(3), A(3), dA(3,3)
   real*8              :: rotA(3)
   rotA(1) = dA(3,2) - dA(2,3) / x(1)
-  rotA(2) = dA(1,3) - dA(3,1) - A(3) / x(1)
+  rotA(2) = dA(1,3)/x(1) - dA(3,1) - A(3) / x(1)
   rotA(3) = dA(2,1) - dA(1,2)
   return
 end
 
 pure subroutine calc_RK4_analytic(fields, R, Z, phi, A_out, dA_out, B_out, dB_out, B_norm, dB_norm, bn, dBn, E)
   use phys_module, only: mode, central_mass, central_density
-  use constants, only: mu_zero, mass_proton
+  use constants, only: mu_zero, atomic_mass_unit
   class(fields_base), intent(in) :: fields
   ! Routine parameters
   real*8, intent(in)  :: R,Z, phi      !< position in  [m,m,rad]
@@ -596,7 +596,7 @@ end
 
 pure subroutine calc_RK4(fields, time, i_elm, st, phi, A, dA, B, dB, Bnorm, dBnorm, bn, dBn, E)
   use phys_module, only: F0, mode, central_mass, central_density
-  use constants, only: mu_zero, mass_proton
+  use constants, only: mu_zero, atomic_mass_unit
 ! Routine parameters
   class(fields_base), intent(in) :: fields
   real*8, intent(in)  :: time
@@ -623,7 +623,7 @@ pure subroutine calc_RK4(fields, time, i_elm, st, phi, A, dA, B, dB, Bnorm, dBno
   real*8             :: psi, psi_R, psi_Z, psi_RR, psi_ZZ, psi_RZ, psi_Rphi, psi_Zphi
   real*8             :: U, U_R, U_Z, U_phi, t_norm
 
-  t_norm  = sqrt(mu_zero * mass_proton * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
+  t_norm  = sqrt(mu_zero * ATOMIC_MASS_UNIT * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
 
   call fields%interp_PRZ_2(time, i_elm, i_var, 2, st(1), st(2), phi, P, P_s, P_t, P_phi, &
                        P_time, P_ss, P_st, P_tt, P_sphi, P_tphi, P_stime, P_ttime,   &
@@ -727,7 +727,7 @@ end subroutine calc_RK4
 
 subroutine check_consistency_RK4(fields, i_elm, st)
   use phys_module, only: F0, mode, central_mass, central_density
-  use constants, only: mu_zero, mass_proton
+  use constants, only: mu_zero, atomic_mass_unit
   use mod_find_rz_nearby
   class(fields_base), intent(in) :: fields
   real*8  :: time
@@ -756,7 +756,7 @@ subroutine check_consistency_RK4(fields, i_elm, st)
   real*8             :: U, U_R, U_Z, U_phi, t_norm
 
   integer            :: i_elm_p, i_elm_m, ifail
-  real*8             :: st_p(2), st_m(2), Rout, Zout, R_p, Z_p, R_m, Z_m, delta, error
+  real*8             :: st_p(2), st_m(2), Rout, Zout, R_p, Z_p, R_m, Z_m, phi_m, phi_p, delta, error
   real*8             :: A_p(3), dA_p(3,3), B_p(3), db_p(3,3), Bnorm_p(3), dBnorm_p(3,3), Bn_p, dBn_p(3), E_p(3)
   real*8             :: A_m(3), dA_m(3,3), B_m(3), db_m(3,3), Bnorm_m(3), dBnorm_m(3,3), Bn_m, dbn_m(3), E_m(3)
   logical            :: verbose = .false.
@@ -783,7 +783,7 @@ subroutine check_consistency_RK4(fields, i_elm, st)
   call calc_RK4(fields, time, i_elm_m, st_m, phi, A_m, dA_m, B_m, dB_m, Bnorm_m, dBnorm_m, bn_m, dBn_m, E_m)
 
   if (verbose) then
-    write(*,*) 'RK4 consistency check : '
+  write(*,*) 'RK4 consistency check : R dependence'
     write(*,'(A,8e18.10)') 'A(1),  dA(1,1)  : ',A(1), dA(1,1), (A_p(1) - A_m(1))/ (2.d0*delta)
     write(*,'(A,8e18.10)') 'A(2),  dA(2,1)  : ',A(2), dA(2,1), (A_p(2) - A_m(2))/ (2.d0*delta)
     write(*,'(A,8e18.10)') 'A(3),  dA(3,1)  : ',A(3), dA(3,1), (A_p(3) - A_m(3))/ (2.d0*delta)
@@ -812,6 +812,7 @@ subroutine check_consistency_RK4(fields, i_elm, st)
   call calc_RK4(fields, time, i_elm_m, st_m, phi, A_m, dA_m, B_m, dB_m, Bnorm_m, dBnorm_m, bn_m, dBn_m, E_m)
 
   if (verbose) then
+  write(*,*) 'RK4 consistency check : Z dependence'
     write(*,'(A,8e18.10)') 'A(1),  dA(1,2)  : ',A(1), dA(1,2), (A_p(1) - A_m(1))/ (2.d0*delta)
     write(*,'(A,8e18.10)') 'A(2),  dA(2,2)  : ',A(2), dA(2,2), (A_p(2) - A_m(2))/ (2.d0*delta)
     write(*,'(A,8e18.10)') 'A(3),  dA(3,2)  : ',A(3), dA(3,2), (A_p(3) - A_m(3))/ (2.d0*delta)
@@ -829,6 +830,37 @@ subroutine check_consistency_RK4(fields, i_elm, st)
   error = error +     abs(dbn(2)  - (bn_p   - bn_m)  /(2.d0*delta))
   error = error + sum(abs(dBnorm(:,2) - (Bnorm_p(:) - Bnorm_m(:))/(2.d0*delta)))
 
+R_p = R 
+Z_p = Z
+phi_p = phi + delta
+call find_RZ_nearby(fields%node_list, fields%element_list, R, Z, st(1), st(2), i_elm, R_p, Z_p, st_p(1), st_p(2), i_elm_p, ifail)
+call calc_RK4(fields, time, i_elm_p, st_p, phi_p, A_p, dA_p, B_p, dB_p, Bnorm_p, dBnorm_p, bn_p, dBn_p, E_p)
+
+R_m = R
+Z_m = Z
+phi_m = phi - delta
+call find_RZ_nearby(fields%node_list, fields%element_list, R, Z, st(1), st(2), i_elm, R_m, Z_m, st_m(1), st_m(2), i_elm_m, ifail)
+call calc_RK4(fields, time, i_elm_m, st_m, phi_m, A_m, dA_m, B_m, dB_m, Bnorm_m, dBnorm_m, bn_m, dBn_m, E_m)
+
+if (verbose) then
+  write(*,*) 'RK4 consistency check : phi dependence'
+  write(*,'(A,8e18.10)') 'A(1),  dA(1,3)  : ',A(1), dA(1,3), (A_p(1) - A_m(1))/ (2.d0*delta)
+  write(*,'(A,8e18.10)') 'A(2),  dA(2,3)  : ',A(2), dA(2,3), (A_p(2) - A_m(2))/ (2.d0*delta)
+  write(*,'(A,8e18.10)') 'A(3),  dA(3,3)  : ',A(3), dA(3,3), (A_p(3) - A_m(3))/ (2.d0*delta)
+  write(*,'(A,8e18.10)') 'bn,    dbn(3)   : ',bn,   dbn(3),  (bn_p   - bn_m)  / (2.d0*delta)
+  write(*,'(A,8e18.10)') 'B(1),  dB(1,3)  : ',B(1), dB(1,3), (B_p(1) - B_m(1))/ (2.d0*delta)
+  write(*,'(A,8e18.10)') 'B(2),  dB(2,3)  : ',B(2), dB(2,3), (B_p(2) - B_m(2))/ (2.d0*delta)
+  write(*,'(A,8e18.10)') 'B(3),  dB(3,3)  : ',B(3), dB(3,3), (B_p(3) - B_m(3))/ (2.d0*delta)
+  write(*,'(A,8e18.10)') 'Bnorm(1),  dBnorm(1,3)  : ',Bnorm(1), dBnorm(1,3), (Bnorm_p(1) - Bnorm_m(1))/ (2.d0*delta)
+  write(*,'(A,8e18.10)') 'Bnorm(2),  dBnorm(2,3)  : ',Bnorm(2), dBnorm(2,3), (Bnorm_p(2) - Bnorm_m(2))/ (2.d0*delta)
+  write(*,'(A,8e18.10)') 'Bnorm(3),  dBnorm(3,3)  : ',Bnorm(3), dBnorm(3,3), (Bnorm_p(3) - Bnorm_m(3))/ (2.d0*delta)
+endif
+
+error =         sum(abs(dA(:,3) - (A_p(:) - A_m(:))/(2.d0*delta)))
+error = error + sum(abs(dB(:,3) - (B_p(:) - B_m(:))/(2.d0*delta)))
+error = error +     abs(dbn(3)  - (bn_p   - bn_m)  /(2.d0*delta))
+error = error + sum(abs(dBnorm(:,3) - (Bnorm_p(:) - Bnorm_m(:))/(2.d0*delta)))
+
   write(*,*) 'RK4 consistency : error : ',error
 
   return
@@ -836,7 +868,7 @@ end subroutine check_consistency_RK4
 
 pure subroutine calc_Qin_analytic(fields, R, Z, phi, A_out, dA_out, B_out, dB_out, B_norm, dB_norm, bn, dBn, E)
   use phys_module, only: mode, central_mass, central_density
-  use constants, only: mu_zero, mass_proton
+  use constants, only: mu_zero, atomic_mass_unit
   class(fields_base), intent(in) :: fields
   ! Routine parameters
   real*8, intent(in)  :: R,Z, phi      !< position in  [m,m,rad]
@@ -956,7 +988,7 @@ end
 
 pure subroutine calc_Qin(fields, time, i_elm, st, phi, A, dA, B, dB, Bnorm, dBnorm, bn, dBn, E)
   use phys_module, only: F0, mode, central_mass, central_density
-  use constants, only: mu_zero, mass_proton
+  use constants, only: mu_zero, atomic_mass_unit
   ! Routine parameters
   class(fields_base), intent(in) :: fields
   real*8, intent(in)  :: time
@@ -983,7 +1015,7 @@ pure subroutine calc_Qin(fields, time, i_elm, st, phi, A, dA, B, dB, Bnorm, dBno
   real*8             :: psi, psi_R, psi_Z, psi_RR, psi_ZZ, psi_RZ, psi_Rphi, psi_Zphi
   real*8             :: U, U_R, U_Z, U_phi, t_norm
 
-  t_norm  = sqrt(mu_zero * mass_proton * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
+  t_norm  = sqrt(mu_zero * ATOMIC_MASS_UNIT * central_mass * central_density * 1.d20) ! 1 jorek time unit in seconds
 
   call fields%interp_PRZ_2(time, i_elm, i_var, 2, st(1), st(2), phi, P, P_s, P_t, P_phi, &
                          P_time, P_ss, P_st, P_tt, P_sphi, P_tphi, P_stime, P_ttime,   &
@@ -1100,7 +1132,7 @@ end subroutine calc_Qin
 
 subroutine check_consistency_Qin(fields, i_elm, st)
   use phys_module, only: F0, mode, central_mass, central_density
-  use constants, only: mu_zero, mass_proton
+  use constants, only: mu_zero, atomic_mass_unit
   use mod_find_rz_nearby
   class(fields_base), intent(in) :: fields
   real*8  :: time
@@ -1226,7 +1258,7 @@ pure subroutine calc_EBNormBGradBCurlbDbdt(fields,time,i_elm,st,phi,E,b, &
   normB,gradB,curlb,dbdt)
   !> load modules
   use phys_module, only: F0, mode, central_mass, central_density
-  use constants, only: mu_zero,mass_proton
+  use constants, only: mu_zero,atomic_mass_unit
   use mod_math_operators, only: cross_product
   use mod_coordinate_transforms, only: transform_first_derivatives_st_to_RZ
   use mod_coordinate_transforms, only: transform_second_derivatives_st_to_RZ
@@ -1260,7 +1292,7 @@ pure subroutine calc_EBNormBGradBCurlbDbdt(fields,time,i_elm,st,phi,E,b, &
     U(4),U(5),RZ(1),RZ(2),RZ(3),RZ(7),RZ(8),RZ(9))
 
   !> convert the electric potential into SI units
-  U = F0*U/sqrt(mu_zero*mass_proton*central_mass*central_density*1.d20)
+  U = F0*U/sqrt(mu_zero*ATOMIC_MASS_UNIT*central_mass*central_density*1.d20)
 
   !> transform first U derivatives from st to RZ
   call transform_first_derivatives_st_to_RZ(U_RZ(1),U_RZ(2),1,U(2),U(3), &

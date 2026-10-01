@@ -230,6 +230,8 @@ module hdf5_io_module
     allocate(dims(rank)); allocate(maxdims(rank));
     !*** get space size ***
     call H5Sget_simple_extent_dims_f(dataspace_id,dims,maxdims,error)
+    !*** Closing ***
+    call H5Dclose_f(dataset_id,error)
   end subroutine HDF5_extract_dataset_rank_shape
 
   !----------------------------------------
@@ -337,7 +339,7 @@ module hdf5_io_module
   subroutine HDF5_char_saving(file_id,charvar,dsetname,mpi_rank,n_mpi_tasks,&
   mpi_comm_in,use_hdf5_parallel_in,mpio_collective_in)
 #ifdef __GFORTRAN__
-    use mpi, only: MPI_Allreduce,MPI_INTEGER,MPI_MAX,MPI_IN_PLACE
+    use mpi_mod
 #else
     use mpi
 #endif
@@ -427,7 +429,7 @@ module hdf5_io_module
   subroutine HDF5_array1D_saving_char(file_id,array1D,dim1,dsetname,start,&
   mpi_comm_in,use_hdf5_parallel_in,mpio_collective_in)
 #ifdef __GFORTRAN__
-    use mpi, only: MPI_Allreduce,MPI_INTEGER,MPI_MAX,MPI_IN_PLACE
+    use mpi_mod
 #else
     use mpi
 #endif

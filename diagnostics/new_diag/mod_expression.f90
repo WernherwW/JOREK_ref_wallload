@@ -652,9 +652,12 @@ module mod_expression
     real*8  :: flux_av_fact
 
 #if (defined WITH_Neutrals) || (defined WITH_Impurities)
-    real*8  :: LradDrays_T, LradDcont_T, Sion_T, Srec_T
-    real*8  :: dLradDrays_dT, dLradDcont_dT, dSion_dT, dSrec_dT
-    real*8  :: Lrad_imp, r_imp_bg, i_imp, frad_bg
+    real*8  :: Te_corr_eV, Te_eV
+    real*8  :: LradDrays_T, LradDcont_T, LradDcont_corr, Sion_T, Srec_T
+    real*8  :: dLradDrays_dT, dLradDcont_dT, dLradDcont_dT_corr, dSion_dT, dSrec_dT
+    real*8  :: ne_SI, ne_JOREK                              ! Electron density used in radiation rate
+    real*8  :: Lrad_imp, r_imp_bg, frad_bg
+    integer :: i_imp
 #endif
 
 #if (defined WITH_Neutrals) && (!defined WITH_Impurities)
@@ -846,7 +849,7 @@ max_pstariter = 80
         element  = pol_pos%element
         nodes(:) = pol_pos%nodes(:)
 
-        if(export_aux_node_list .and. (size(aux_node_list%node) > 0)) then
+        if(export_aux_node_list .and. allocated(aux_node_list%node)) then
            aux_nodes(:) = aux_node_list%node(pol_pos%element%vertex(:))
         endif
         
@@ -931,7 +934,7 @@ max_pstariter = 80
                 vv(:)  = 0.d0
                 vv(1:n_var)  = nodes(i)%values(i_tor,j,:)
 		            va(:)  = 0.d0
-                if(export_aux_node_list .and. (size(aux_node_list%node) > 0)) then
+              if(export_aux_node_list .and. allocated(aux_node_list%node)) then
                    va(1:n_var)  = aux_nodes(i)%values(i_tor,j,:)
                 endif
                 
@@ -1607,6 +1610,16 @@ max_pstariter = 80
           ! Critical and Dreicer Electric fields
           call E_Cr(Te0_corr, r0, E_crit)
           call E_Dr(Te0_corr, r0, E_dreicer)
+          ! --- Coulomb logarithms calculated according to Ref. [L. Hesselow et al, J Plasma Phys 84,
+          !     p. 905840605 (2018); doi:10.1017/S0022377818001113] Eq. (2.7) and (2.9):
+          Te0_eV     = Te0_corr / ( EL_CHG * MU_ZERO * central_density * 1.d20 )
+          ne0_20     = max(1.d-8, r0) * central_density
+          ln_Lambda0 = 14.9 - 0.5 * log( ne0_20 ) + log( Te0_eV / 1000.d0 ) ! Eq. (2.7) at thermal speeds
+          ln_Lambda  = 14.6 + 0.5 * log( Te0_eV / ne0_20 )                  ! Eq. (2.9) at relativistic energies
+                  
+         ! E_crit = C_LIGHT**2 * EL_CHG**3 * ln_Lambda * MU_ZERO**2.5 * (central_density*1.d20*central_mass*ATOMIC_MASS_UNIT)**1.5 * r0 / ( 4 * PI * MASS_ELECTRON * ATOMIC_MASS_UNIT * central_mass )
+          
+         ! E_dreicer = EL_CHG**3 * ln_Lambda0 * MU_ZERO**1.5 * (central_density*1.d20*central_mass*ATOMIC_MASS_UNIT)**2.5 * r0 / ( 2.d0 * PI * EPS_ZERO**2 * (ATOMIC_MASS_UNIT*central_mass)**2 * T0 )
           
 #if JOREK_MODEL >= 303
           if (bootstrap) then
@@ -1623,8 +1636,8 @@ max_pstariter = 80
 #if (defined WITH_Neutrals) && (!defined WITH_Impurities)
 
    if (use_imp_adas) then
-     call atomic_coeff_deuterium(Te0_corr, Sion_T, dSion_dT, Srec_T, dSrec_dT,        &
-                                LradDcont_T, dLradDcont_dT, LradDrays_T, dLradDrays_dT, r0, rn0, .true. ) 
+     call atomic_coeff_deuterium(Te0_corr, Sion_T, dSion_dT, Srec_T, dSrec_dT, LradDcont_T, dLradDcont_dT, &
+                                 LradDcont_corr, dLradDcont_dT_corr, LradDrays_T, dLradDrays_dT, r0, rn0, .true. ) 
      ! Note the inputs and outputs of atomic_coeff_deuterium are all in JOREK units!!!
 
     !--------------------------------------------------------
@@ -1658,7 +1671,7 @@ max_pstariter = 80
         if ( units == SI_UNITS ) then
           frad_bg = nimp_bg(1)*Arad_bg*exp(-((log(Te_corr_eV)-log(Brad_bg))**2.)/Crad_bg**2.)
         else if ( units == JOREK_UNITS ) then
-          frad_bg = (2./3.)*(1./(central_mass*MASS_PROTON))*((MU_ZERO*central_mass*MASS_PROTON*central_density*1.d20)**(1.5d0))*nimp_bg(1)*Arad_bg*exp(-((log(Te_corr_eV)-log(Brad_bg))**2.)/Crad_bg**2.)
+          frad_bg = (2./3.)*(1./(central_mass*ATOMIC_MASS_UNIT))*((MU_ZERO*central_mass*ATOMIC_MASS_UNIT*central_density*1.d20)**(1.5d0))*nimp_bg(1)*Arad_bg*exp(-((log(Te_corr_eV)-log(Brad_bg))**2.)/Crad_bg**2.)
         end if
       else
         write(*,*) "WARNING: hard-coded fitting doesn't exist for  ", trim(imp_type(1)), ", use open adas instead!"
@@ -1975,16 +1988,16 @@ Ec_eff = Ec_eff * sqrt(MU_zero * central_density *1.d20 * central_mass * mass_pr
 
           ! --- Factors for switching between JOREK normalized and SI units.
           if ( units == SI_UNITS ) then
-             rho_norm      = central_density *1.d20 * central_mass * mass_proton   ! rho_0 = central mass density
+             rho_norm      = central_density *1.d20 * central_mass * ATOMIC_MASS_UNIT   ! rho_0 = central mass density
              fact_time     = sqrt(MU_zero*rho_norm)                                ! time factor
              fact_mu_zero  = MU_zero                                               ! division by mu_zero for P and J
              fact_ne       = central_density * 1.d20                               ! factor for n_e
-             fact_rho      = central_density * 1.d20 * central_mass*MASS_PROTON    ! factor for rho
+             fact_rho      = central_density * 1.d20 * central_mass*ATOMIC_MASS_UNIT    ! factor for rho
              fact_T        = 1.d0 / ( MU_zero * central_density * 1.d20 * EL_CHG ) ! factor for T
              fact_vpar     = sqrt(BB2) / fact_time                                 ! factor for Vpar
              fact_resistiv = sqrt ( MU_zero / rho_norm )                           ! factor for eta == 1 / (factor for visco)
              fact_Er       = F0 / fact_time
-             fact_rad      = 1.d0/(2.d0/3.d0*MU_ZERO**1.5d0*(central_mass*MASS_PROTON*central_density*1.d20)**0.5d0) ! factor for Prad (not Lrad)
+             fact_rad      = 1.d0/(2.d0/3.d0*MU_ZERO**1.5d0*(central_mass*ATOMIC_MASS_UNIT*central_density*1.d20)**0.5d0) ! factor for Prad (not Lrad)
              fact_flux     = 1.d0/(mu_zero*fact_time)  
             fact_nre      = sqrt ( rho_norm / MU_zero ) / ( EL_CHG * R) 
              fact_ffp_si   = -1.d0   ! En SI:  J_phi * mu_0 * R ~ FF'_SI, then FF'_SI = -FF'_JOREK
@@ -2439,7 +2452,7 @@ Ec_eff = Ec_eff * sqrt(MU_zero * central_density *1.d20 * central_mass * mass_pr
                 res = J_boot / R / fact_mu_zero
 
 #if (defined WITH_Neutrals) && (!defined WITH_Impurities)
-              case ( 'radiation' )
+              case ( 'radiation' ) !< outputs radiation power (i.e. what a bolometer would measure), rather than the radiative cooling
 
                 if (rn0 .lt. 0.d0) then
                   res = r0 * r0 * LradDcont_T * fact_rad &
@@ -2450,7 +2463,7 @@ Ec_eff = Ec_eff * sqrt(MU_zero * central_density *1.d20 * central_mass * mass_pr
                        + r0 * fact_ne * frad_bg
                 endif
 
-              case ( 'brem' )
+              case ( 'brem' ) !< outputs radiation power (i.e. what a bolometer would measure), rather than the radiative cooling
                 res = r0 * r0 * LradDcont_T * fact_rad
 
               case ('line_rad')

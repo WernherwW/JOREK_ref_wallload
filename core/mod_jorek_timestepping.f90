@@ -134,6 +134,9 @@ subroutine setup_solvers(this, sim)
     endif
   endif
 
+  ! --- flag that this is a particle simulation
+  use_particles = .true.
+  
   ! --- Initialize the vacuum part.
   call vacuum_init(sim%my_id, freeboundary_equil, freeboundary, resistive_wall)
 
@@ -183,10 +186,14 @@ subroutine setup_solvers(this, sim)
   endif
 
   ! nodes, elements, bnd_nodes and phys have already been broadcast
-  if ( freeboundary ) call broadcast_vacuum(sim%my_id, resistive_wall)
 
   call update_equil_state(sim%my_id, sim%fields%node_list, sim%fields%element_list, bnd_elm_list, xpoint, xcase)
   this%es = ES
+
+  if ( freeboundary ) then
+     call broadcast_vacuum(sim%my_id, resistive_wall)
+     call read_Z_axis_profile()
+  end if
 
   if ( sim%my_id == 0 ) then
     call print_equil_state(.true.)
@@ -258,6 +265,7 @@ subroutine do_jorek_timestep(this, sim, ev)
   use mod_live_data_core,      only: write_live_data_all
   use tr_module,               only: tr_print_memsize, tr_resetfile
   use mod_export_restart
+  use mod_import_restart,      only: rst_file_ind_fmt
   use construct_matrix_mod
   use pellet_module
   use vacuum
@@ -385,7 +393,18 @@ subroutine do_jorek_timestep(this, sim, ev)
   call clck_time(t0)
   if (this%solver%step_success) then  
 
-    ! TODO add if use_pellet
+    if (use_pellet) then
+      pellet_volume = total_pellet_volume
+      call update_pellet(sim%my_id, sim%fields%node_list, sim%fields%element_list)
+
+      if (sim%my_id == 0) then
+        xtime_pellet_R(index_now)         = pellet_R
+        xtime_pellet_Z(index_now)         = pellet_Z
+        xtime_pellet_psi(index_now)       = pellet_psi
+        xtime_pellet_particles(index_now) = pellet_particles
+        xtime_phys_ablation(index_now)    = phys_ablation
+      endif
+    endif
 
 #if (defined WITH_Neutrals) || (defined WITH_Impurities)
     if (using_spi) then
@@ -439,7 +458,7 @@ subroutine do_jorek_timestep(this, sim, ev)
     mindelta = minval(this%deltas%val(1:this%deltas%n)); maxdelta = maxval(this%deltas%val(1:this%deltas%n));
     
     ! --- Output some information about the current timestep
-    130 format(1x,a,i5.5,a,es10.3,a)
+    130 format(1x,a,i6.6,a,es10.3,a)
     131 format(1x,a,2(2(es10.2,' ...',es10.2,',')))
     132 format(1x,'-------------------------------------------------------------------')
     133 format(1x,a,2(es10.2,' at ',i10,','))
@@ -499,7 +518,7 @@ subroutine do_jorek_timestep(this, sim, ev)
   
   ! --- Write a restart file every nout timesteps
   if ( (sim%my_id == 0) .and. (mod(index_now,nout) == 0) ) then
-    write(fileout,'(A5,i5.5)') 'jorek',index_now
+    write(fileout,rst_file_ind_fmt(1)) 'jorek',index_now
     call export_restart(sim%fields%node_list, sim%fields%element_list, fileout, aux_node_list)
   endif
   
