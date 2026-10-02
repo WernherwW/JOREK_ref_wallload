@@ -73,7 +73,8 @@ type octree_node
    integer      :: depth         !< The depth of this node, for root depth = 1
    real(kind=8) :: boundary(2,3) !< [x_min, x_max; y_min, y_max, z_min, z_max] of the volume belonging this node
    type(octree_triangle), allocatable :: contained(:) !< Triangles contained within this node.
-   type(octree_node), pointer         :: children(:)  !< Child nodes this element has.
+   type(octree_node), pointer         :: children(:) => null() !< Child nodes this element has. Leaf nodes never
+                                                               !< assign this, so it must start out nullified.
 end type octree_node
 
 contains
@@ -135,6 +136,7 @@ subroutine mod_wall_collision_export(sim, file, iangle_groups)
 
         ! Collect wall IDs, weights, and evaluate energy. TODO add other particle types
         allocate( wall_id(n_here), weight(n_here), energy(n_here), iangle(n_here) )
+        energy = 0.d0 !< markers whose energy cannot be evaluated below must not contribute
         do k=1,n_here
            wall_id(k) = -sim%groups(i)%particles(k)%i_elm ! Assuming i_elm = - wall_id for markers that were lost.
            weight(k)  = sim%groups(i)%particles(k)%weight
@@ -168,19 +170,19 @@ subroutine mod_wall_collision_export(sim, file, iangle_groups)
         ! Gather data from other processes
         allocate( wall_id_all(n_total), weight_all(n_total), energy_all(n_total), iangle_all(n_total) )
         call MPI_Gatherv(wall_id(:), n_here, MPI_INTEGER, &
-             wall_id_all(:), particles_per_proc, [(sum(particles_per_proc(1:i),1), i=0,n_mpi-1)], &
+             wall_id_all(:), particles_per_proc, [(sum(particles_per_proc(0:i-1),1), i=0,n_mpi-1)], &
              MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
 
         call MPI_Gatherv(weight(:), n_here, MPI_REAL8, &
-             weight_all(:), particles_per_proc, [(sum(particles_per_proc(1:i),1), i=0,n_mpi-1)], &
+             weight_all(:), particles_per_proc, [(sum(particles_per_proc(0:i-1),1), i=0,n_mpi-1)], &
              MPI_REAL8, 0, MPI_COMM_WORLD, ierr)
 
         call MPI_Gatherv(energy(:), n_here, MPI_REAL8, &
-             energy_all(:), particles_per_proc, [(sum(particles_per_proc(1:i),1), i=0,n_mpi-1)], &
+             energy_all(:), particles_per_proc, [(sum(particles_per_proc(0:i-1),1), i=0,n_mpi-1)], &
              MPI_REAL8, 0, MPI_COMM_WORLD, ierr)
 
         call MPI_Gatherv(iangle(:), n_here, MPI_REAL8, &
-             iangle_all(:), particles_per_proc, [(sum(particles_per_proc(1:i),1), i=0,n_mpi-1)], &
+             iangle_all(:), particles_per_proc, [(sum(particles_per_proc(0:i-1),1), i=0,n_mpi-1)], &
              MPI_REAL8, 0, MPI_COMM_WORLD, ierr)
 
         deallocate(particles_per_proc, wall_id, energy, weight, iangle)

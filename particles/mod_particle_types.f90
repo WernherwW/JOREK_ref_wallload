@@ -833,6 +833,7 @@ subroutine initialize_particle_to_zero(particle)
 
   particle%i_elm=0;    particle%i_life=0; 
   particle%t_birth=0.; particle%weight=0d0;
+  particle%t_loss=0.d0;
   particle%st=0d0;     particle%x=0d0;
   select type (p=>particle)
     type is (particle_fieldline)

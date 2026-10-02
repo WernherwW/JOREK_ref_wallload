@@ -200,8 +200,8 @@ subroutine initialize(sim,skip_jorek2help,my_id,n_mpi,do_jorek_init_in,skip_grou
     ! Initialise mode numbers
     call det_modes()
 
-    ! Initialise and broadcast parameters 
-    call initialise_and_broadcast_parameters(sim%my_id, "__NO_FILENAME__", .true.)
+    ! Hard-coded standalone groups do not use namelist coupling configuration.
+    call initialise_and_broadcast_parameters(sim%my_id, "__NO_FILENAME__", .not. present(num_groups))
 
     ! Set up normalisation factors
     call sim%set_t_norm()

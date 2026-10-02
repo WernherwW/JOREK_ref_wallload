@@ -32,12 +32,12 @@ real*8 :: rnd(1), psi, U, B(3), E(3)
 
 type(octree_node) :: wall
 
-! Load wall model
+! Read and broadcast input parameters before loading the wall model.
+call sim%initialize(num_groups=1)
 call mod_wall_collision_init(wall_collision_model,max_depth_wall,wall)
 
-! Read particle file
-call sim%initialize(num_groups=1)
-call read_simulation_hdf5(sim, 'part_restart.h5')
+! Read particle file (atomic rates are not needed for orbit tracking).
+call read_simulation_hdf5(sim, 'part_restart.h5', load_atomic_data=.false.)
 n_part = size(sim%groups(1)%particles)
 allocate(prtkin(n_part))
 allocate(iangle(1,n_part))

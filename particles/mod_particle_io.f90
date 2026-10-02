@@ -390,8 +390,9 @@ end subroutine write_simulation_hdf5
 !>   mpi_info_in:    (integer)(optional) MPI info structre for parallel IO
 !> outputs:
 !>   sim: (particle_sim) particle simulation object
+!>   load_atomic_data: optional; defaults to true. Disable only for collisionless orbit tracking.
 subroutine read_simulation_hdf5(sim,filename,use_hdf5_access_properties,&
-mpi_comm_in,mpi_info_in,test_in)
+mpi_comm_in,mpi_info_in,test_in,load_atomic_data)
   use phys_module
   use mod_particle_group_id, only: matching_part_config_indices
   use mpi
@@ -429,11 +430,11 @@ mpi_comm_in,mpi_info_in,test_in)
   character(len=*),intent(in) :: filename
   logical,intent(in),optional :: use_hdf5_access_properties
   integer,intent(in),optional :: mpi_comm_in,mpi_info_in
-  logical,intent(in),optional :: test_in
+  logical,intent(in),optional :: test_in,load_atomic_data
   !> inputs-outputs:
   class(particle_sim),intent(inout) :: sim  
   !> variables:
-  logical                                        :: file_exists
+  logical                                        :: file_exists, read_atomic_data
   integer                                        :: i,j,k,ierr,h5err,errorcode
   integer                                        :: mpi_comm_loc,mpi_info_loc
   integer                                        :: storage_type,max_corder,rank
@@ -475,6 +476,8 @@ mpi_comm_in,mpi_info_in,test_in)
   mpi_info_loc = MPI_INFO_NULL
   if(present(mpi_info_in)) mpi_info_loc = mpi_info_in
   test = .false.; if(present(test_in)) test = test_in;
+  read_atomic_data = .true.
+  if (present(load_atomic_data)) read_atomic_data = load_atomic_data
 
   !> check if part_restart.h5 exists
   inquire(file=filename, exist=file_exists)
@@ -505,7 +508,18 @@ mpi_comm_in,mpi_info_in,test_in)
   call HDF5_array1D_reading_char(file_id, part_groups_in_use_old, '/part_groups_in_use')
   !> overwrite part_groups_in_use with part_groups_in_use_old read in from 
   !> restart if it has not been manually defined
-  if (part_groups_in_use(1) == 'non') part_groups_in_use(1:n_groups_old) = part_groups_in_use_old 
+  if (sim%hard_coded_init) then
+    ! Standalone examples select their groups from the restart, without namelist configs.
+    if (n_groups_old /= size(sim%groups)) then
+      write(*,*) 'ERROR: restart group count differs from hard-coded group count'
+      call MPI_ABORT(mpi_comm_loc, 1, ierr)
+      return
+    endif
+    part_groups_in_use = 'non'
+    part_groups_in_use(1:n_groups_old) = part_groups_in_use_old
+  else if (part_groups_in_use(1) == 'non') then
+    part_groups_in_use(1:n_groups_old) = part_groups_in_use_old
+  endif
 
   !> set up a recording of which group from part_restart.h5 has been dropped
   allocate(dropped_groups_mask(n_groups_old))
@@ -518,7 +532,7 @@ mpi_comm_in,mpi_info_in,test_in)
   if (sim%my_id == master_task) then
     write(*,*) "" 
     write(*,*) "====== LOADING PARTICLE GROUPS ======"
-  endif 
+  endif
 
   do i=1, n_part_groups ! loop over groups in part_groups_in_use
 
@@ -628,7 +642,7 @@ mpi_comm_in,mpi_info_in,test_in)
           sim%groups(i)%ad%suffix = tmp_ad_suffix
         endif
         
-        if((len_trim(sim%groups(i)%ad%suffix).gt.0).and.(.not.test)) then
+        if((len_trim(sim%groups(i)%ad%suffix).gt.0).and.(.not.test).and.read_atomic_data) then
           if (trim(adas_dir) .eq. '') then
             sim%groups(i)%ad = read_adf11(sim%my_id,sim%groups(i)%ad%suffix)
           else
