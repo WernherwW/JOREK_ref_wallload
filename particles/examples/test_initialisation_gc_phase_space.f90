@@ -20,6 +20,7 @@ use data_structure,  only: type_bnd_node_list,type_bnd_element_list
 use mod_boundary,    only: boundary_from_grid
 use mod_expression,  only: exprs_all_int,init_expr,exprs,SI_UNITS
 use mod_integrals3D, only: int3d_new
+use mod_impurity,    only: init_imp_adas
 use mod_boundary,    only: boundary_from_grid
 use equil_info
 use mod_random_seed
@@ -118,6 +119,15 @@ call with(sim,field_reader)
 if(sim%my_id.eq.0) call boundary_from_grid(sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,.false.)
 call broadcast_boundary(sim%my_id,bnd_elm_list,bnd_node_list)
 call update_equil_state(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_elm_list,xpoint,xcase)
+#if (defined WITH_Neutrals) || (defined WITH_Impurities)
+  ! Load ADAS without resetting the histories imported from the restart.
+  call init_imp_adas(sim%my_id, initialize_history=.false.)
+#else
+  if (use_imp_adas .and. (nimp_bg(1) > 0.d0)) then
+    call init_imp_adas(sim%my_id, initialize_history=.false.)
+  endif
+#endif
+
 !> initailise simulation parameters
 sim%time = start_time
 sim%groups(1)%mass = mass
