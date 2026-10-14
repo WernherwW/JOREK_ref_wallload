@@ -85,6 +85,8 @@ mass            = 5.48579909065d-4 !< electron mass in AMU
 Rbound          = [0.d0,9.99d2]
 Zbound          = [-9.99d2,9.99d2]
 Phibound        = 2.5d-1*[TWOPI,5d0*PI]
+! Ipre_tot averages the full torus; sample the same domain in the RE-current case.
+if (trim(test_case)=='jorek_recurrent_density_re') Phibound = [0.d0,TWOPI]
 Ekinbound       = [2d7-1d4,2d7+1d4]
 Pitchbound      = [PI-2.95d-1,PI]
 Chargebound     = -1.d0
@@ -97,6 +99,8 @@ particle_histo_filename = 'jorek_histogram_from_gc.txt'
 particle_pdf_filename   = 'jorek_pdf_from_gc.txt'
 exact_pdf_filename      = 'jorek_exact_pdf_at_midpoints.txt'
 particle_restart_filename = 'part_restart.h5'
+n_int_weight_param      = 0
+allocate(int_weight_param(0))
 n_int_pdf_param         = 0
 n_real_pdf_param        = 0
 sup_pdf_safety_factor   = 1d0
@@ -145,8 +149,16 @@ phase_space_bounds(:,2) = [Rbound(2),Zbound(2),Phibound(2),Pbound(2),Pitchbound(
 !> select the pdf to use
 write(*,*) ' '
 write(*,*) 'SELECT PDF TO USE: '
-if(trim(test_case)=='jorek_current_density_re') then
-  write(*,*) 'SELECTED: JOREK CURRENT DENSITY RUNAWAY ELECTRONS!'
+if(trim(test_case)=='jorek_current_density_re' .or. trim(test_case)=='jorek_recurrent_density_re') then
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+#ifndef WITH_Refluid
+    write(*,*) 'ERROR: jorek_recurrent_density_re requires WITH_Refluid.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ifail)
+#endif
+    write(*,*) 'SELECTED: JOREK RE CURRENT DENSITY RUNAWAY ELECTRONS!'
+  else
+    write(*,*) 'SELECTED: JOREK CURRENT DENSITY RUNAWAY ELECTRONS!'
+  endif
   n_real_pdf_param = 3; allocate(real_pdf_param(n_real_pdf_param));
   real_pdf_param   = [1.d0,mass,sup_pdf_safety_factor]
   n_int_pdf_param  = 1; allocate(int_pdf_param(n_int_pdf_param));
@@ -158,21 +170,36 @@ if(trim(test_case)=='jorek_current_density_re') then
   real_pdf_to_part_coord_param(1) = mass  
   pdf_to_use          => pdf_current_density_uniform_phase
   weight_to_use       => particle_weight_current_density_uniform_phase
+  if (trim(test_case)=='jorek_recurrent_density_re') weight_to_use => weight_uniform_one
   pdf_to_part_coord   => spherical_p_cartesian_q_to_relativistic_gc
   pdf_upper_bound     = sup_pdf_current_density_uniform_phase(n_variables,&
   phase_space_bounds(:,1),phase_space_bounds(:,2),sim%fields,&
   n_real_pdf_param,real_pdf_param,n_int_pdf_param,int_pdf_param)
-  !> compute the integral of the current density in the volume
+  if (trim(test_case)=='jorek_recurrent_density_re' .and. pdf_upper_bound <= 0.d0) then
+    write(*,*) 'ERROR: RE current is zero; cannot initialize from this distribution.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ifail)
+  endif
+  !> Integrate the original j-based quantity, or obtain the total fluid I_RE [A].
   allocate(DUMMY_REAL_ARRAY(n_real_weight_param+1)); call init_expr;
-  call int3d_new(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,&
-  exprs('int3d_jR_tot',1,exprs_all_int%n_coord,exprs_all_int),DUMMY_REAL_ARRAY,SI_UNITS)
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+    call int3d_new(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,&
+    exprs('Ipre_tot',1,exprs_all_int%n_coord,exprs_all_int),DUMMY_REAL_ARRAY,SI_UNITS)
+  else
+    call int3d_new(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,&
+    exprs('int3d_jR_tot',1,exprs_all_int%n_coord,exprs_all_int),DUMMY_REAL_ARRAY,SI_UNITS)
+  endif
   real_weight_param = [DUMMY_REAL_ARRAY(2),real(n_particles,kind=8),sim%groups(1)%mass]; 
   deallocate(DUMMY_REAL_ARRAY);
   call MPI_Bcast(real_weight_param,n_real_weight_param,MPI_REAL8,0,MPI_COMM_WORLD,ifail)
   !> compute the total number of physical particles
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+    ! The physical marker weight is set from I_RE after sampling.
+    n_tot_phys_particles = 0.d0
+  else
   n_tot_phys_particles = n_physical_particle_current_density_uniform_phase(n_variables,&
   start_time,sim%fields,phase_space_bounds(:,1),phase_space_bounds(:,2),n_real_weight_param,&
   real_weight_param,n_int_weight_param,int_weight_param)
+  endif
 elseif(trim(test_case)=='uniform_weight') then
   write(*,*) 'SELECTED: WEIGHTED PDF UNIFORM!'
   n_real_pdf_param = 2; allocate(real_pdf_param(n_real_pdf_param));
@@ -230,6 +257,12 @@ n_int_pdf_param,int_pdf_param,n_real_weight_param,real_weight_param,n_int_weight
 int_weight_param,n_real_gdf_param,real_gdf_param,n_int_gdf_param,int_gdf_param,&
 n_real_pdf_to_part_coord_param,real_pdf_to_part_coord_param,&
 n_int_pdf_to_part_coord_param,int_pdf_to_part_coord_param)
+
+!> Match the measured GC toroidal current to the imported RE fluid current.
+if (trim(test_case)=='jorek_recurrent_density_re') then
+  call normalize_re_current(sim%groups(1)%particles,sim%fields,sim%groups(1)%mass,&
+    start_time,Phibound(2)-Phibound(1),real_weight_param(1),n_tot_phys_particles)
+endif
 
 !> Produce the expected pdf fromt the guiding center histogram -------------------------------
 if(do_verification) then
@@ -845,7 +878,7 @@ end function sup_pdf_uniform
 function pdf_current_density_uniform_phase(nx,x,st,time,i_elm,fields,&
 x_min,x_max,n_real_param,real_param,n_int_param,int_param) result(pdf)
   use constants,          only: MU_ZERO,EL_CHG,SPEED_OF_LIGHT,PI
-  use mod_model_settings, only: var_zj
+  use mod_model_settings, only: var_zj,var_nre
   use mod_interp,         only: interp_PRZ
   use mod_fields,         only: fields_base
   implicit none
@@ -864,14 +897,24 @@ x_min,x_max,n_real_param,real_param,n_int_param,int_param) result(pdf)
   real*8 :: DUMMY_DOUBLE_1,DUMMY_DOUBLE_2
   real*8,dimension(1) :: jphi
   !> interpolate the jorek toroidal current density at the particle position
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+    call interp_PRZ(fields%node_list,fields%element_list,i_elm,[var_nre],1,&
+    st(1),st(2),x(3),jphi,DUMMY_DOUBLE_1,DUMMY_DOUBLE_2)
+    ! The toroidal fluid current is Vlight * (B_phi/|B|) * nre/(mu0*R).
+    ! GC particles acquire B_phi/|B| from their parallel velocity.
+    ! Sample j_RE/(B_phi/|B|), so projection reproduces j_RE, not j_RE*b_phi.
+    jphi(1) = re_parallel_speed_normalized() * max(jphi(1),0.d0)
+  else
   call interp_PRZ(fields%node_list,fields%element_list,i_elm,[var_zj],1,&
   st(1),st(2),x(3),jphi,DUMMY_DOUBLE_1,DUMMY_DOUBLE_2)
+  endif
   !> compute the pdf
   DUMMY_DOUBLE_1 = sqrt((x_max(4)**2)/((real_param(2)*SPEED_OF_LIGHT)**2)+1.d0)
   DUMMY_DOUBLE_2 = sqrt((x_min(4)**2)/((real_param(2)*SPEED_OF_LIGHT)**2)+1.d0)
   pdf = ((DUMMY_DOUBLE_1**3)-3.d0*DUMMY_DOUBLE_1) - ((DUMMY_DOUBLE_2**3)-3.d0*DUMMY_DOUBLE_2);
   pdf = pdf*(cos(x_min(5))**2 - cos(x_max(5))**2)
   pdf =(-3.d0*jphi(1))/(pdf*x(6)*PI*EL_CHG*MU_ZERO*(real_param(2)**3)*(SPEED_OF_LIGHT**4)*x(1))
+  if (trim(test_case)=='jorek_recurrent_density_re') pdf = abs(pdf)
 end function pdf_current_density_uniform_phase
 
 !> Upper bound phase space distribution based on the plasma current density
@@ -896,7 +939,7 @@ end function pdf_current_density_uniform_phase
 function sup_pdf_current_density_uniform_phase(nx,x_min,x_max,fields,&
 n_real_param,real_param,n_int_param,int_param) result(sup_pdf)
   use constants,          only: SPEED_OF_LIGHT,EL_CHG,MU_ZERO,PI
-  use mod_model_settings, only: n_var,var_zj
+  use mod_model_settings, only: n_var,var_zj,var_nre
   use mod_fields,         only: fields_base
   implicit none
   !> Inputs:
@@ -922,7 +965,13 @@ n_real_param,real_param,n_int_param,int_param) result(sup_pdf)
   call Integrals_3D(int_param(1),fields%node_list,fields%element_list,&
   density_tot,density_in,density_out,pressure_tot,pressure_in,pressure_out,&
   kin_par_tot,kin_par_in,kin_par_out,mom_par_tot,mom_par_in,mom_par_out,varmin,varmax)
-  zj_minmax = [varmin(var_zj),varmax(var_zj)]
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+    ! |B_phi/|B|| <= 1: use a conservative bound on the RE current.
+    zj_minmax = abs(re_parallel_speed_normalized()) * &
+      max(abs(varmin(var_nre)),abs(varmax(var_nre))) * [-1.d0,1.d0]
+  else
+    zj_minmax = [varmin(var_zj),varmax(var_zj)]
+  endif
   call MPI_Bcast(zj_minmax,2,MPI_REAL8,0,MPI_COMM_WORLD,ifail)
   !> compute the maximum and the minimum of the pdf
   sqrtpovermc2plus1_max = sqrt((x_max(4)**2)/((real_param(2)*SPEED_OF_LIGHT)**2)+1.d0);
@@ -941,6 +990,7 @@ n_real_param,real_param,n_int_param,int_param) result(sup_pdf)
   else
     sup_pdf = min_pdf
   endif
+  if (trim(test_case)=='jorek_recurrent_density_re') sup_pdf = abs(sup_pdf)
 end function sup_pdf_current_density_uniform_phase
 
 !> Compute the gdf used for sampling the particle coordinates in 
@@ -1274,5 +1324,75 @@ x_min,x_max,n_real_param,real_param,n_int_param,int_param) result(n_phys_part)
   n_phys_part = (2.d0*real_param(1)*(x_max(4)**3 - x_min(4)**3))/&
   (n_phys_part*x_min(6)*EL_CHG*(real_param(3)**3)*(SPEED_OF_LIGHT**4))
 end function n_physical_particle_current_density_uniform_phase
+
+!> Normalize the parallel GC current, using the same toroidal average as Ipre_tot.
+!> For markers representing a toroidal interval dphi, I = sum(q*w*v_phi/R)/dphi.
+!> The original phase-space sampler is retained; a common weight fixes its amplitude.
+subroutine normalize_re_current(particles,fields,mass,time,dphi,target_current,n_phys_local)
+  use constants, only: EL_CHG,SPEED_OF_LIGHT
+  use mod_particle_types, only: particle_base,particle_gc_relativistic
+  use mod_fields, only: fields_base
+  use mpi
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+  class(particle_base), intent(inout) :: particles(:)
+  class(fields_base), intent(in) :: fields
+  real*8, intent(in) :: mass,time,dphi,target_current
+  real*8, intent(out) :: n_phys_local
+  real*8 :: E(3),B(3),psi,U,Bnorm,gamma,vparallel
+  real*8 :: current_local,current_global,weight_scale,current_after
+  integer :: i,ierr,my_id
+
+  call MPI_Comm_rank(MPI_COMM_WORLD,my_id,ierr)
+  if (dphi <= 0.d0 .or. .not. ieee_is_finite(target_current) .or. target_current == 0.d0) then
+    if (my_id == 0) write(*,*) 'ERROR: nonzero I_RE and a positive toroidal interval are required.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  current_local = 0.d0
+  select type (plist => particles)
+  type is (particle_gc_relativistic)
+    do i=1,size(plist)
+      call fields%calc_EBpsiU(time,plist(i)%i_elm,plist(i)%st,plist(i)%x(3),E,B,psi,U)
+      Bnorm = norm2(B)
+      gamma = sqrt(1.d0 + (plist(i)%p(1)/(mass*SPEED_OF_LIGHT))**2 + &
+        2.d0*Bnorm*plist(i)%p(2)/(mass*SPEED_OF_LIGHT**2))
+      vparallel = plist(i)%p(1)/(mass*gamma)
+      current_local = current_local + real(plist(i)%q,kind=8)*EL_CHG*plist(i)%weight * &
+        vparallel * B(3)/Bnorm / plist(i)%x(1) / dphi
+    enddo
+  class default
+    if (my_id == 0) write(*,*) 'ERROR: RE current normalization requires relativistic GC particles.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  end select
+  call MPI_Allreduce(current_local,current_global,1,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,ierr)
+  if (.not. ieee_is_finite(current_global) .or. current_global == 0.d0) then
+    if (my_id == 0) write(*,*) 'ERROR: initialized particles carry zero or invalid current.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  weight_scale = target_current/current_global
+  if (.not. ieee_is_finite(weight_scale) .or. weight_scale <= 0.d0) then
+    if (my_id == 0) write(*,*) 'ERROR: particle pitch/charge current direction disagrees with I_RE.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  particles%weight = particles%weight * weight_scale
+  n_phys_local = sum(particles%weight)
+  call MPI_Allreduce(current_local*weight_scale,current_after,1,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,ierr)
+  if (my_id == 0) then
+    write(*,'(A,ES22.14)') ' Target fluid I_RE [A]: ',target_current
+    write(*,'(A,ES22.14)') ' Initialized GC I_RE [A]: ',current_after
+    write(*,'(A,ES22.14)') ' RE marker weight scale: ',weight_scale
+  endif
+end subroutine normalize_re_current
+
+!> Parallel RE speed in the normalization used by the fluid current.
+function re_parallel_speed_normalized() result(vlight)
+  use phys_module, only: Vpar_re_sign,gamma_rel,central_mass,central_density
+  use constants, only: SPEED_OF_LIGHT,MU_ZERO,ATOMIC_MASS_UNIT
+  implicit none
+  real*8 :: vlight
+  vlight = Vpar_re_sign * SPEED_OF_LIGHT * &
+    sqrt(MU_ZERO * central_mass * ATOMIC_MASS_UNIT * central_density * 1.d20) * &
+    sqrt(1.d0 - 1.d0/gamma_rel**2)
+end function re_parallel_speed_normalized
 
 end program test_initialisation_gc_phase_space
