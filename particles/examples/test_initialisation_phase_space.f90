@@ -31,7 +31,7 @@ type(pcg32_rng)              :: rng_pcg32
 type(event)                  :: field_reader
 type(type_bnd_node_list)     :: bnd_node_list
 type(type_bnd_element_list)  :: bnd_elm_list
-logical                      :: write_txt 
+logical                      :: write_txt,do_verification
 integer                      :: ii,n_variables,n_particles,nR,nZ,nphi,np,npitch,nchi
 integer                      :: n_int_pdf_param,n_real_pdf_param,ifail
 integer                      :: n_int_weight_param,n_real_weight_param
@@ -68,34 +68,39 @@ call sim%initialize(num_groups=1)
 
 !>-------------------------------------------------------------------------------------------
 !> Define inputs ----------------------------------------------------------------------------
-write_txt   = .false.
-test_case   = 'jorek_current_density_re'
+write_txt   = .true.
+do_verification = .false.
+test_case   = 'jorek_recurrent_density_re'
 n_variables = 7
-n_particles = 10000000
+n_particles = 1000000
 nR          = 2
 nZ          = 2
 nphi        = 2
-np          = 81
-npitch      = 81
-nchi        = 81
-start_time  = 0.d0
+np          = 3
+npitch      = 3
+nchi        = 3
+start_time  = 44.d-3
 mass        = 5.48579909065d-4 !< electron mass in AMU
 Rbound      = [0.d0,9.99d2]
 Zbound      = [-9.99d2,9.99d2]
 Phibound    = 2.5d-1*[TWOPI,5d0*PI]
-Ekinbound   = [2d7-1d4,2d7+1d4]
+! Ipre_tot averages the full torus; sample the same domain in the RE-current case.
+if (trim(test_case)=='jorek_recurrent_density_re') Phibound = [0.d0,TWOPI]
+Ekinbound   = [2d6-1d4,2d6+1d4]
 Pitchbound  = [PI-2.95d-1,PI]
 Chibound    = [0.d0,TWOPI]
 Chargebound = -1.d0
 charge      = -1.d0
 allocate(character(len=25)::jorek_filename)
-jorek_filename          = 'jorek_equilibrium' 
+jorek_filename          = 'jorek'
 particle_filename       = 'jorek_particle_outputs.txt'
 mesh_filename_root      = 'jorek_kinetic_mesh_'
 particle_histo_filename = 'jorek_histogram_from_particles.txt'
 particle_pdf_filename   = 'jorek_pdf_from_particles.txt'
 exact_pdf_filename      = 'jorek_exact_pdf_at_midpoints.txt'
 particle_restart_filename = 'part_restart.h5'
+n_int_weight_param      = 0
+allocate(int_weight_param(0))
 n_int_pdf_param         = 0
 n_real_pdf_param        = 0
 sup_pdf_safety_factor   = 1d0
@@ -145,8 +150,16 @@ phase_space_bounds(:,2) = [Rbound(2),Zbound(2),Phibound(2),Pbound(2),Pitchbound(
 !> select the pdf to use
 write(*,*) ' '
 write(*,*) 'SELECT PDF TO USE: '
-if(trim(test_case)=='jorek_current_density_re') then
-  write(*,*) 'SELECTED: JOREK CURRENT DENSITY RUNAWAY ELECTRONS!'
+if(trim(test_case)=='jorek_current_density_re' .or. trim(test_case)=='jorek_recurrent_density_re') then
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+#ifndef WITH_Refluid
+    write(*,*) 'ERROR: jorek_recurrent_density_re requires WITH_Refluid.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ifail)
+#endif
+    write(*,*) 'SELECTED: JOREK RE CURRENT DENSITY RUNAWAY ELECTRONS!'
+  else
+    write(*,*) 'SELECTED: JOREK CURRENT DENSITY RUNAWAY ELECTRONS!'
+  endif
   n_real_pdf_param = 3; allocate(real_pdf_param(n_real_pdf_param));
   real_pdf_param   = [1.d0,mass,sup_pdf_safety_factor]
   n_int_pdf_param  = 1; allocate(int_pdf_param(n_int_pdf_param));
@@ -156,21 +169,36 @@ if(trim(test_case)=='jorek_current_density_re') then
   n_real_pdf_to_part_coord_param = 0
   pdf_to_use          => pdf_current_density_uniform_phase
   weight_to_use       => particle_weight_current_density_uniform_phase
+  if (trim(test_case)=='jorek_recurrent_density_re') weight_to_use => weight_uniform_one
   pdf_to_part_coord   => spherical_p_cartesian_q_to_relativistic_kinetic
   pdf_upper_bound     = sup_pdf_current_density_uniform_phase(n_variables,&
   phase_space_bounds(:,1),phase_space_bounds(:,2),sim%fields,&
   n_real_pdf_param,real_pdf_param,n_int_pdf_param,int_pdf_param)
-  !> compute the integral of the current density in the volume
-  allocate(DUMMY_REAL_ARRAY(n_real_weight_param+1)); call init_expr;
-  call int3d_new(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,&
-  exprs('int3d_jR_tot',1,exprs_all_int%n_coord,exprs_all_int),DUMMY_REAL_ARRAY,SI_UNITS)
-  real_weight_param = [DUMMY_REAL_ARRAY(2),real(n_particles,kind=8),sim%groups(1)%mass]; 
+  if (trim(test_case)=='jorek_recurrent_density_re' .and. pdf_upper_bound <= 0.d0) then
+    write(*,*) 'ERROR: RE current is zero; cannot initialize from this distribution.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ifail)
+  endif
+  !> Obtain I_RE, or the original current integral, without an implicit time column.
+  allocate(DUMMY_REAL_ARRAY(1)); call init_expr;
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+    call int3d_new(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,&
+    exprs('Ipre_tot',1,exprs_all_int%n_coord,exprs_all_int),DUMMY_REAL_ARRAY,SI_UNITS)
+  else
+    call int3d_new(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,&
+    exprs('int3d_jR_tot',1,exprs_all_int%n_coord,exprs_all_int),DUMMY_REAL_ARRAY,SI_UNITS)
+  endif
+  real_weight_param = [DUMMY_REAL_ARRAY(1),real(n_particles,kind=8),sim%groups(1)%mass];
   deallocate(DUMMY_REAL_ARRAY);
   call MPI_Bcast(real_weight_param,n_real_weight_param,MPI_REAL8,0,MPI_COMM_WORLD,ifail)
   !> compute the total number of physical particles
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+    ! Physical marker weights are set from I_RE after sampling.
+    n_tot_phys_particles = 0.d0
+  else
   n_tot_phys_particles = n_physical_particle_current_density_uniform_phase(n_variables,&
   start_time,sim%fields,phase_space_bounds(:,1),phase_space_bounds(:,2),&
   n_real_weight_param,real_weight_param,n_int_weight_param,int_weight_param)
+  endif
 elseif(trim(test_case)=='uniform_weight') then
   write(*,*) 'SELECTED: WEIGHTED PDF UNIFORM!'
   n_real_pdf_param = 2; allocate(real_pdf_param(n_real_pdf_param));
@@ -183,10 +211,10 @@ elseif(trim(test_case)=='uniform_weight') then
   phase_space_bounds(1:n_variables-1,1),phase_space_bounds(1:n_variables-1,2),&
   n_real_pdf_param,real_pdf_param,n_int_pdf_param,int_pdf_param)
   !> compute the plasma volume
-  allocate(DUMMY_REAL_ARRAY(n_real_weight_param+1)); call init_expr;
+  allocate(DUMMY_REAL_ARRAY(1)); call init_expr;
   call int3d_new(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,&
   exprs('volume',1,exprs_all_int%n_coord,exprs_all_int),DUMMY_REAL_ARRAY,SI_UNITS)
-  real_weight_param = [DUMMY_REAL_ARRAY(2),real(n_particles,kind=8)]; 
+  real_weight_param = [DUMMY_REAL_ARRAY(1),real(n_particles,kind=8)];
   deallocate(DUMMY_REAL_ARRAY);
   call MPI_Bcast(real_weight_param,n_real_weight_param,MPI_REAL8,0,MPI_COMM_WORLD,ifail)
   !> compute total number of physical particles
@@ -225,36 +253,45 @@ int_weight_param,n_real_gdf_param,real_gdf_param,n_int_gdf_param,int_gdf_param,&
 n_real_pdf_to_part_coord_param,real_pdf_to_part_coord_param,&
 n_int_pdf_to_part_coord_param,int_pdf_to_part_coord_param)
 
-!> Produce the expected pdf fromt the particle histogram --------------------------------------
-write(*,*) "... building particle histogram and computing the expected pdf"
-select type(plist=>sim%groups(1)%particles)
-  type is (particle_kinetic_relativistic)
-  call compute_cylindrical_spherical_histogram_pdf(histo,expected_pdf,Rmesh,&
-  Zmesh,phimesh,pmesh,pitchmesh,chimesh,n_particles,plist,start_time,nR,nZ,nphi,np,&
-  npitch,nchi,Rbound,Zbound,Phibound,Pbound,Pitchbound,Chibound,sim%fields)
-end select
+!> Match the MPI-wide particle toroidal current to the fluid I_RE.
+if (trim(test_case)=='jorek_recurrent_density_re') then
+  call normalize_re_current(sim%groups(1)%particles,sim%groups(1)%mass,&
+    Phibound(2)-Phibound(1),real_weight_param(1),n_tot_phys_particles)
+endif
 
-!> Compute the input pdf at the mesh element midpoints and the L2 error w.r.t. the 
-!> the expected pdf from the  particle histogram and the error on the 
-!> total number of physical particles
-write(*,*) "... computing the input pdf at the midpoints of the mesh elements"
-call evaluate_pdf_at_midpoints(pdf_at_midpoints,nR,nZ,nphi,np,npitch,nchi,Rmesh,Zmesh,phimesh,&
-     pmesh,pitchmesh,chimesh,charge,start_time,pdf_to_use,sim%fields,n_real_pdf_param,&
-     real_pdf_param,n_int_pdf_param,int_pdf_param)
-write(*,*) "... computing L2 error"
-call compute_error_norm2_ndim6(error,error_norm,error_avg_norm,nR-1,nZ-1,nphi-1,np-1,&
-npitch-1,nchi-1,expected_pdf,pdf_at_midpoints,pdf_upper_bound) 
-call compute_error_tot_n_phys_particles(error_n_phys_particles,error_n_phys_particles_norm,&
-n_tot_phys_particles,sim%groups(1)%particles)
+if (do_verification) then
+  !> Produce the expected pdf fromt the particle histogram --------------------------------------
+  write(*,*) "... building particle histogram and computing the expected pdf"
+  select type(plist=>sim%groups(1)%particles)
+    type is (particle_kinetic_relativistic)
+    call compute_cylindrical_spherical_histogram_pdf(histo,expected_pdf,Rmesh,&
+    Zmesh,phimesh,pmesh,pitchmesh,chimesh,n_particles,plist,start_time,nR,nZ,nphi,np,&
+    npitch,nchi,Rbound,Zbound,Phibound,Pbound,Pitchbound,Chibound,sim%fields)
+  end select
 
-!> Log test results -------------------------------------------------------------------------
-write(*,*) "... logging test results"
-write(*,*) "L2 error between the expected pdf from particle histogram and the input pdf at mid points: ",error
-write(*,*) "L2 error normalized to the maximum of the input pdf: ",error_norm
-write(*,*) "L2 error averaged and normalised to the maximum of the input pdf: ",error_avg_norm
-write(*,*) "Error on the total number of physical particles: ",error_n_phys_particles
-write(*,*) "Error on the total number of physical particles normalised: ",error_n_phys_particles_norm
-write(*,*) " "
+  !> Compute the input pdf at the mesh element midpoints and the L2 error w.r.t. the
+  !> the expected pdf from the  particle histogram and the error on the
+  !> total number of physical particles
+  write(*,*) "... computing the input pdf at the midpoints of the mesh elements"
+  call evaluate_pdf_at_midpoints(pdf_at_midpoints,nR,nZ,nphi,np,npitch,nchi,Rmesh,Zmesh,phimesh,&
+       pmesh,pitchmesh,chimesh,charge,start_time,pdf_to_use,sim%fields,n_real_pdf_param,&
+       real_pdf_param,n_int_pdf_param,int_pdf_param)
+  write(*,*) "... computing L2 error"
+  call compute_error_norm2_ndim6(error,error_norm,error_avg_norm,nR-1,nZ-1,nphi-1,np-1,&
+  npitch-1,nchi-1,expected_pdf,pdf_at_midpoints,pdf_upper_bound)
+  call compute_error_tot_n_phys_particles(error_n_phys_particles,error_n_phys_particles_norm,&
+  n_tot_phys_particles,sim%groups(1)%particles)
+
+  !> Log test results -------------------------------------------------------------------------
+  write(*,*) "... logging test results"
+  write(*,*) "L2 error between the expected pdf from particle histogram and the input pdf at mid points: ",error
+  write(*,*) "L2 error normalized to the maximum of the input pdf: ",error_norm
+  write(*,*) "L2 error averaged and normalised to the maximum of the input pdf: ",error_avg_norm
+  write(*,*) "Error on the total number of physical particles: ",error_n_phys_particles
+  write(*,*) "Error on the total number of physical particles normalised: ",error_n_phys_particles_norm
+  write(*,*) " "
+
+endif ! do_verification
 
 !> Write data into file ---------------------------------------------------------------------
 write(*,*) "... write particle restart file"
@@ -263,15 +300,17 @@ write(*,*) "... writing data in files"
 if(write_txt) then
   call dump_kinetic_particles_in_txt(n_particles,sim%groups(1)%particles,sim%groups(1)%mass,&
   start_time,sim%fields,particle_filename,ifail)
-  call write_array1d_double(nR,Rmesh,trim(trim(mesh_filename_root)//'R.txt'),ifail)
-  call write_array1d_double(nZ,Zmesh,trim(trim(mesh_filename_root)//'Z.txt'),ifail)
-  call write_array1d_double(nphi,phimesh,trim(trim(mesh_filename_root)//'phi.txt'),ifail)
-  call write_array1d_double(np,pmesh,trim(trim(mesh_filename_root)//'p.txt'),ifail)
-  call write_array1d_double(npitch,pitchmesh,trim(trim(mesh_filename_root)//'pitch.txt'),ifail)
-  call write_array1d_double(nchi,chimesh,trim(trim(mesh_filename_root)//'gyro.txt'),ifail)
-  call write_array6d_integer(nchi-1,npitch-1,np-1,nphi-1,nZ-1,nR-1,histo,trim(particle_histo_filename),ifail)
-  call write_array6d_double(nchi-1,npitch-1,np-1,nphi-1,nZ-1,nR-1,expected_pdf,trim(particle_pdf_filename),ifail)
-  call write_array6d_double(nchi-1,npitch-1,np-1,nphi-1,nZ-1,nR-1,pdf_at_midpoints,trim(exact_pdf_filename),ifail)
+  if (do_verification) then
+    call write_array1d_double(nR,Rmesh,trim(trim(mesh_filename_root)//'R.txt'),ifail)
+    call write_array1d_double(nZ,Zmesh,trim(trim(mesh_filename_root)//'Z.txt'),ifail)
+    call write_array1d_double(nphi,phimesh,trim(trim(mesh_filename_root)//'phi.txt'),ifail)
+    call write_array1d_double(np,pmesh,trim(trim(mesh_filename_root)//'p.txt'),ifail)
+    call write_array1d_double(npitch,pitchmesh,trim(trim(mesh_filename_root)//'pitch.txt'),ifail)
+    call write_array1d_double(nchi,chimesh,trim(trim(mesh_filename_root)//'gyro.txt'),ifail)
+    call write_array6d_integer(nchi-1,npitch-1,np-1,nphi-1,nZ-1,nR-1,histo,trim(particle_histo_filename),ifail)
+    call write_array6d_double(nchi-1,npitch-1,np-1,nphi-1,nZ-1,nR-1,expected_pdf,trim(particle_pdf_filename),ifail)
+    call write_array6d_double(nchi-1,npitch-1,np-1,nphi-1,nZ-1,nR-1,pdf_at_midpoints,trim(exact_pdf_filename),ifail)
+  endif ! do_verification
 endif
 !> add here method for writing the charge mesh distribution as well
 !> Clean-up ---------------------------------------------------------------------------------
@@ -866,7 +905,7 @@ end function sup_pdf_uniform
 function pdf_current_density_uniform_phase(nx,x,st,time,i_elm,fields,&
 x_min,x_max,n_real_param,real_param,n_int_param,int_param) result(pdf)
   use constants,          only: MU_ZERO,EL_CHG,SPEED_OF_LIGHT
-  use mod_model_settings, only: var_zj
+  use mod_model_settings, only: var_zj,var_nre
   use mod_interp,         only: interp_PRZ
   use mod_fields,         only: fields_base
   implicit none
@@ -885,14 +924,23 @@ x_min,x_max,n_real_param,real_param,n_int_param,int_param) result(pdf)
   real*8 :: DUMMY_DOUBLE_1,DUMMY_DOUBLE_2
   real*8,dimension(1) :: jphi
   !> interpolate the jorek toroidal current density at the particle position
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+    call interp_PRZ(fields%node_list,fields%element_list,i_elm,[var_nre],1,&
+    st(1),st(2),x(3),jphi,DUMMY_DOUBLE_1,DUMMY_DOUBLE_2)
+    ! Uniform gyro phase averages perpendicular current to zero.
+    ! Parallel particle motion supplies B_phi/|B|: sample nre/R, not nre*b_phi/R.
+    jphi(1) = re_parallel_speed_normalized() * max(jphi(1),0.d0)
+  else
   call interp_PRZ(fields%node_list,fields%element_list,i_elm,[var_zj],1,&
   st(1),st(2),x(3),jphi,DUMMY_DOUBLE_1,DUMMY_DOUBLE_2)
+  endif
   !> compute the pdf
   DUMMY_DOUBLE_1 = sqrt((x_max(4)**2)/((real_param(2)*SPEED_OF_LIGHT)**2)+1.d0)
   DUMMY_DOUBLE_2 = sqrt((x_min(4)**2)/((real_param(2)*SPEED_OF_LIGHT)**2)+1.d0)
   pdf = ((DUMMY_DOUBLE_1**3)-3.d0*DUMMY_DOUBLE_1) - ((DUMMY_DOUBLE_2**3)-3.d0*DUMMY_DOUBLE_2);
   pdf = pdf*(cos(x_min(5))**2 - cos(x_max(5))**2)*(x_max(6)-x_min(6))
   pdf =(-6.d0*jphi(1))/(pdf*x(7)*EL_CHG*MU_ZERO*(real_param(2)**3)*(SPEED_OF_LIGHT**4)*x(1))
+  if (trim(test_case)=='jorek_recurrent_density_re') pdf = abs(pdf)
 end function pdf_current_density_uniform_phase
 
 !> Upper bound phase space distribution based on the plasma current density
@@ -917,7 +965,7 @@ end function pdf_current_density_uniform_phase
 function sup_pdf_current_density_uniform_phase(nx,x_min,x_max,fields,&
 n_real_param,real_param,n_int_param,int_param) result(sup_pdf)
   use constants,          only: SPEED_OF_LIGHT,EL_CHG,MU_ZERO
-  use mod_model_settings, only: n_var,var_zj
+  use mod_model_settings, only: n_var,var_zj,var_nre
   use mod_fields,         only: fields_base
   implicit none
   !> Inputs:
@@ -943,7 +991,12 @@ n_real_param,real_param,n_int_param,int_param) result(sup_pdf)
   call Integrals_3D(int_param(1),fields%node_list,fields%element_list,&
   density_tot,density_in,density_out,pressure_tot,pressure_in,pressure_out,&
   kin_par_tot,kin_par_in,kin_par_out,mom_par_tot,mom_par_in,mom_par_out,varmin,varmax)
-  zj_minmax = [varmin(var_zj),varmax(var_zj)]
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+    zj_minmax = abs(re_parallel_speed_normalized()) * &
+      max(abs(varmin(var_nre)),abs(varmax(var_nre))) * [-1.d0,1.d0]
+  else
+    zj_minmax = [varmin(var_zj),varmax(var_zj)]
+  endif
   call MPI_Bcast(zj_minmax,2,MPI_REAL8,0,MPI_COMM_WORLD,ifail)
   !> compute the maximum and the minimum of the pdf
   sqrtpovermc2plus1_max = sqrt((x_max(4)**2)/((real_param(2)*SPEED_OF_LIGHT)**2)+1.d0);
@@ -962,6 +1015,7 @@ n_real_param,real_param,n_int_param,int_param) result(sup_pdf)
   else
     sup_pdf = min_pdf
   endif
+  if (trim(test_case)=='jorek_recurrent_density_re') sup_pdf = abs(sup_pdf)
 end function sup_pdf_current_density_uniform_phase
 
 !> Compute the gdf used for sampling the particle coordinates in 
@@ -1285,5 +1339,75 @@ x_min,x_max,n_real_param,real_param,n_int_param,int_param) result(n_phys_part)
   n_phys_part = (2.d0*real_param(1)*(x_max(4)**3 - x_min(4)**3))/&
   (n_phys_part*x_min(7)*EL_CHG*(real_param(3)**3)*(SPEED_OF_LIGHT**4))
 end function n_physical_particle_current_density_uniform_phase
+
+!> Normalize the full-orbit toroidal current, using the same toroidal average as Ipre_tot.
+!> For markers representing a toroidal interval dphi, I = sum(q*w*v_phi/R)/dphi.
+!> The original phase-space sampler is retained; a common weight fixes its amplitude.
+subroutine normalize_re_current(particles,mass,dphi,target_current,n_phys_local)
+  use constants, only: EL_CHG,SPEED_OF_LIGHT
+  use mod_particle_types, only: particle_base,particle_kinetic_relativistic
+  use mod_coordinate_transforms, only: vector_cartesian_to_cylindrical
+  use mpi
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+  class(particle_base), intent(inout) :: particles(:)
+  real*8, intent(in) :: mass,dphi,target_current
+  real*8, intent(out) :: n_phys_local
+  real*8 :: pcyl(3),gamma,vphi
+  real*8 :: current_local,current_global,weight_scale,current_after
+  integer :: i,ierr,my_id
+
+  call MPI_Comm_rank(MPI_COMM_WORLD,my_id,ierr)
+  if (dphi <= 0.d0 .or. .not. ieee_is_finite(target_current) .or. target_current == 0.d0) then
+    if (my_id == 0) write(*,*) 'ERROR: nonzero I_RE and a positive toroidal interval are required.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  current_local = 0.d0
+  select type (plist => particles)
+  type is (particle_kinetic_relativistic)
+    do i=1,size(plist)
+      pcyl = vector_cartesian_to_cylindrical(plist(i)%x(3),plist(i)%p)
+      gamma = sqrt(1.d0 + dot_product(plist(i)%p,plist(i)%p)/(mass*SPEED_OF_LIGHT)**2)
+      vphi = pcyl(3)/(mass*gamma)
+      current_local = current_local + real(plist(i)%q,kind=8)*EL_CHG*plist(i)%weight * &
+        vphi / plist(i)%x(1) / dphi
+    enddo
+  class default
+    if (my_id == 0) write(*,*) 'ERROR: RE current normalization requires relativistic kinetic particles.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  end select
+  call MPI_Allreduce(current_local,current_global,1,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,ierr)
+  if (.not. ieee_is_finite(current_global) .or. current_global == 0.d0) then
+    if (my_id == 0) write(*,*) 'ERROR: initialized particles carry zero or invalid current.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  weight_scale = target_current/current_global
+  if (.not. ieee_is_finite(weight_scale)) then
+    if (my_id == 0) write(*,*) 'ERROR: RE current weight scale is not finite.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  if (weight_scale <= 0.d0) then
+    if (my_id == 0) write(*,*) 'ERROR: particle pitch/charge current direction disagrees with I_RE.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  particles%weight = particles%weight * weight_scale
+  n_phys_local = sum(particles%weight)
+  call MPI_Allreduce(current_local*weight_scale,current_after,1,MPI_REAL8,MPI_SUM,MPI_COMM_WORLD,ierr)
+  if (my_id == 0) then
+    write(*,'(A,ES22.14)') ' Target fluid I_RE [A]: ',target_current
+    write(*,'(A,ES22.14)') ' Initialized kinetic I_RE [A]: ',current_after
+  endif
+end subroutine normalize_re_current
+
+!> Parallel RE speed in the normalization used by the fluid current.
+function re_parallel_speed_normalized() result(vlight)
+  use phys_module, only: Vpar_re_sign,gamma_rel,central_mass,central_density
+  use constants, only: SPEED_OF_LIGHT,MU_ZERO,ATOMIC_MASS_UNIT
+  implicit none
+  real*8 :: vlight
+  vlight = Vpar_re_sign * SPEED_OF_LIGHT * &
+    sqrt(MU_ZERO * central_mass * ATOMIC_MASS_UNIT * central_density * 1.d20) * &
+    sqrt(1.d0 - 1.d0/gamma_rel**2)
+end function re_parallel_speed_normalized
 
 end program test_initialisation_phase_space

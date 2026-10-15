@@ -1756,6 +1756,8 @@ aux_q0    = 0.d0; aux_jx0   = 0.d0; aux_jy0   = 0.d0; aux_jz0   = 0.d0; aux_jz0_
 #else
           VK_int = VK_int + r0 * (dudx**2 + dudy**2) * BigR**2 * xjac * BigR * wst * delta_phi
           VM_int = VM_int + (dpsidx**2+dpsidy**2)/BigR**2 * xjac * BigR * wst * delta_phi
+          VB_int = VB_int + 2.0*r0*T0 / BB2 * xjac * BigR * wst * delta_phi
+          mag_pres_int = mag_pres_int + BB2/2 * xjac * BigR * wst * delta_phi
 
 #endif
 

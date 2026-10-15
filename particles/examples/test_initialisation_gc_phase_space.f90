@@ -72,14 +72,14 @@ call sim%initialize(num_groups=1)
 !> Define inputs ----------------------------------------------------------------------------
 write_txt       = .true.
 do_verification = .false.
-test_case       = 'jorek_current_density_re'
+test_case       = 'jorek_recurrent_density_re'
 n_variables     = 6
-n_particles     = 100000000
+n_particles     = 1000
 nR              = 2
 nZ              = 2
 nphi            = 2
-np              = 81
-npitch          = 81
+np              = 3
+npitch          = 3
 start_time      = 0.d0
 mass            = 5.48579909065d-4 !< electron mass in AMU
 Rbound          = [0.d0,9.99d2]
@@ -87,12 +87,12 @@ Zbound          = [-9.99d2,9.99d2]
 Phibound        = 2.5d-1*[TWOPI,5d0*PI]
 ! Ipre_tot averages the full torus; sample the same domain in the RE-current case.
 if (trim(test_case)=='jorek_recurrent_density_re') Phibound = [0.d0,TWOPI]
-Ekinbound       = [2d7-1d4,2d7+1d4]
+Ekinbound       = [2d6-1d4,2d6+1d4]
 Pitchbound      = [PI-2.95d-1,PI]
 Chargebound     = -1.d0
 charge          = -1.d0
 allocate(character(len=25)::jorek_filename)
-jorek_filename          = 'jorek_equilibrium' 
+jorek_filename          = 'jorek' 
 particle_filename       = 'jorek_gc_outputs.txt'
 mesh_filename_root      = 'jorek_kinetic_mesh_gc_'
 particle_histo_filename = 'jorek_histogram_from_gc.txt'
@@ -1332,7 +1332,6 @@ subroutine normalize_re_current(particles,fields,mass,time,dphi,target_current,n
   use constants, only: EL_CHG,SPEED_OF_LIGHT
   use mod_particle_types, only: particle_base,particle_gc_relativistic
   use mod_fields, only: fields_base
-  use phys_module, only: F0,Vpar_re_sign
   use mpi
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
@@ -1370,24 +1369,6 @@ subroutine normalize_re_current(particles,fields,mass,time,dphi,target_current,n
     if (my_id == 0) write(*,*) 'ERROR: initialized particles carry zero or invalid current.'
     call MPI_Abort(MPI_COMM_WORLD,1,ierr)
   endif
-  if (my_id == 0) then
-    write(*,'(A,ES22.14)') ' Target fluid Ipre_tot [A]: ',target_current
-    write(*,'(A,ES22.14)') ' Unnormalized signed GC current [A]: ',current_global
-    write(*,'(A,ES22.14)') ' F0: ',F0
-    write(*,'(A,ES22.14)') ' Fluid Vpar_re_sign: ',Vpar_re_sign
-    write(*,'(A,2ES22.14)') ' Configured pitch bounds [rad]: ',Pitchbound
-    write(*,'(A,ES22.14)') ' Configured particle charge [e]: ',charge
-    select type (plist => particles)
-    type is (particle_gc_relativistic)
-      if (size(plist) > 0) then
-        write(*,'(A,ES22.14)') ' Rank 0 first marker p_parallel: ',plist(1)%p(1)
-        write(*,*) ' Rank 0 actual particle charge min/max: ',minval(plist%q),maxval(plist%q)
-        write(*,'(A,2ES22.14)') ' Rank 0 initial weight min/max: ', &
-          minval(plist%weight),maxval(plist%weight)
-      endif
-    end select
-    flush(6)
-  endif
   weight_scale = target_current/current_global
   if (.not. ieee_is_finite(weight_scale)) then
     if (my_id == 0) write(*,*) 'ERROR: RE current weight scale is not finite.'
@@ -1403,7 +1384,6 @@ subroutine normalize_re_current(particles,fields,mass,time,dphi,target_current,n
   if (my_id == 0) then
     write(*,'(A,ES22.14)') ' Target fluid I_RE [A]: ',target_current
     write(*,'(A,ES22.14)') ' Initialized GC I_RE [A]: ',current_after
-    write(*,'(A,ES22.14)') ' RE marker weight scale: ',weight_scale
   endif
 end subroutine normalize_re_current
 
