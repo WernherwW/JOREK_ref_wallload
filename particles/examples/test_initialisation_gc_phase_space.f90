@@ -74,13 +74,13 @@ write_txt       = .true.
 do_verification = .false.
 test_case       = 'jorek_recurrent_density_re'
 n_variables     = 6
-n_particles     = 1000
+n_particles     = 1000000
 nR              = 2
 nZ              = 2
 nphi            = 2
 np              = 3
 npitch          = 3
-start_time      = 0.d0
+start_time      = 44.d-3
 mass            = 5.48579909065d-4 !< electron mass in AMU
 Rbound          = [0.d0,9.99d2]
 Zbound          = [-9.99d2,9.99d2]
@@ -180,7 +180,7 @@ if(trim(test_case)=='jorek_current_density_re' .or. trim(test_case)=='jorek_recu
     call MPI_Abort(MPI_COMM_WORLD,1,ifail)
   endif
   !> Integrate the original j-based quantity, or obtain the total fluid I_RE [A].
-  allocate(DUMMY_REAL_ARRAY(n_real_weight_param+1)); call init_expr;
+  allocate(DUMMY_REAL_ARRAY(1)); call init_expr;
   if (trim(test_case)=='jorek_recurrent_density_re') then
     call int3d_new(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,&
     exprs('Ipre_tot',1,exprs_all_int%n_coord,exprs_all_int),DUMMY_REAL_ARRAY,SI_UNITS)
@@ -188,7 +188,7 @@ if(trim(test_case)=='jorek_current_density_re' .or. trim(test_case)=='jorek_recu
     call int3d_new(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,&
     exprs('int3d_jR_tot',1,exprs_all_int%n_coord,exprs_all_int),DUMMY_REAL_ARRAY,SI_UNITS)
   endif
-  real_weight_param = [DUMMY_REAL_ARRAY(2),real(n_particles,kind=8),sim%groups(1)%mass]; 
+  real_weight_param = [DUMMY_REAL_ARRAY(1),real(n_particles,kind=8),sim%groups(1)%mass];
   deallocate(DUMMY_REAL_ARRAY);
   call MPI_Bcast(real_weight_param,n_real_weight_param,MPI_REAL8,0,MPI_COMM_WORLD,ifail)
   !> compute the total number of physical particles
@@ -214,10 +214,10 @@ elseif(trim(test_case)=='uniform_weight') then
   phase_space_bounds(1:n_variables-1,2) ,n_real_pdf_param,&
   real_pdf_param,n_int_pdf_param,int_pdf_param)
   !> compute the plasma volume
-  allocate(DUMMY_REAL_ARRAY(n_real_weight_param+1)); call init_expr;
+  allocate(DUMMY_REAL_ARRAY(1)); call init_expr;
   call int3d_new(sim%my_id,sim%fields%node_list,sim%fields%element_list,bnd_node_list,bnd_elm_list,&
   exprs('volume',1,exprs_all_int%n_coord,exprs_all_int),DUMMY_REAL_ARRAY,SI_UNITS)
-  real_weight_param = [DUMMY_REAL_ARRAY(2),real(n_particles,kind=8)]; 
+  real_weight_param = [DUMMY_REAL_ARRAY(1),real(n_particles,kind=8)];
   deallocate(DUMMY_REAL_ARRAY);
   call MPI_Bcast(real_weight_param,n_real_weight_param,MPI_REAL8,0,MPI_COMM_WORLD,ifail)
   !> compute total number of physical particles
