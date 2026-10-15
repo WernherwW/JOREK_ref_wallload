@@ -1,0 +1,68 @@
+MODEL             = model600
+FC                = mpif90
+CC                = mpicc
+CXX               = mpicxx
+
+FFLAGS_OMP       = -fopenmp
+FFLAGS           = -w -fallow-argument-mismatch -fdefault-real-8 -fdefault-double-8 -DFUNNELED
+FFLAGS          := $(FFLAGS) -O2 -msse2 -march=native
+
+DEBUGFLAGS  = -g -p
+
+FFLAGS_FIXEDFORM := $(FFLAGS) $(DEBUGFLAGS) $(FFLAGS_OMP)
+FFLAGS_NOBOUNDS  := $(FFLAGS)               $(FFLAGS_OMP)
+FFLAGS           := $(FFLAGS) $(DEBUGFLAGS) $(FFLAGS_OMP)
+
+USE_STRUMPACK = 1
+USE_HIPS   = 0
+USE_PASTIX = 0
+USE_PASTIX_MURGE = 0
+USE_PASTIX6 = 0
+USE_MUMPS = 1
+USE_WSMP   = 0
+USE_FFTW = 1
+USE_HDF5 = 1
+USE_BOOST = 0
+USE_STD_BESSELK = 1
+USE_TASKLOOP = 0
+USE_MKL           = 0
+USE_DIRECT_CONSTRUCTION=0
+USE_BICGSTAB      = 0
+USE_INTSIZE64     = 0
+DEBUG             = 0
+
+LIBDIR_GNU = /pitagora_work/FUPA2_REDISMHD/JOREK_libraries_gnu
+
+ifeq (1, $(USE_MUMPS))
+
+ # METIS
+ LIB_METIS = -L$(METIS_LIB) -lmetis
+ INC_METIS = -I$(METIS_INCLUDE)
+
+ # PARMETIS
+ LIB_PARMETIS = -L$(PARMETIS_LIB) -lparmetis
+ INC_PARMETIS = -I$(PARMETIS_INCLUDE)
+
+ MUMPS_DIR = $(LIBDIR_GNU)/MUMPS_v541_recompiled
+ LIB_MUMPS  = -L$(MUMPS_DIR)/lib -lzmumps -ldmumps -lmumps_common $(LIB_PARMETIS) $(LIB_METIS)
+ INC_MUMPS  = $(MUMPS_DIR)/include $(INC_SCOTCH) $(INC_PARMETIS) $(INC_METIS)
+ ORDLIB     = -L$(MUMPS_DIR)/PORD/lib -lpord
+endif
+
+ifeq (1, $(USE_STRUMPACK))
+ STRUMPACK_HOME= $(LIBDIR_GNU)/STRUMPACK_gnu
+ STRUMPACKINC = -I$(STRUMPACK_HOME)/include
+ STRUMPACKLIB = -L$(STRUMPACK_HOME)/lib64 -lstrumpack
+
+ STRUMPACKINC += -I${METIS_HOME}/include -I${PARMETIS_HOME}/include
+ STRUMPACKLIB += -L${METIS_HOME}/lib -lmetis -L${PARMETIS_HOME}/lib -lparmetis -L${NETLIB_SCALAPACK_LIB} -lscalapack -L${OPENBLAS_LIB} -lopenblas
+
+endif
+
+# --- FFTW Library
+INC_FFTW  = -I${FFTW_INCLUDE}
+LIBFFTW = -L${FFTW_LIB} -lfftw3_mpi -lfftw3
+
+# --- HDF5 Library
+HDF5INCLUDE = ${HDF5_HOME}/include
+HDF5LIB     = -L${HDF5_HOME}/lib -lhdf5_hl_fortran -lhdf5_hl -lhdf5_fortran -lhdf5 -lz
