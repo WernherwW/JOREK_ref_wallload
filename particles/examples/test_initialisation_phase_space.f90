@@ -52,11 +52,11 @@ real*8,dimension(:),allocatable           :: Rmesh,Zmesh,phimesh,pmesh,pitchmesh
 real*8,dimension(:),allocatable           :: real_pdf_param,real_weight_param,real_gdf_param
 real*8,dimension(:),allocatable           :: DUMMY_REAL_ARRAY
 real*8,dimension(:,:,:,:,:,:),allocatable :: expected_pdf,pdf_at_midpoints
-character(len=125)                        :: test_case,particle_filename,mesh_filename_root
-character(len=125)                        :: particle_pdf_filename,exact_pdf_filename
-character(len=125)                        :: particle_histo_filename
-character(len=15)                         :: particle_restart_filename
-character(len=:),allocatable              :: jorek_filename
+character(len=512)                        :: test_case,particle_filename,mesh_filename_root
+character(len=512)                        :: particle_pdf_filename,exact_pdf_filename
+character(len=512)                        :: particle_histo_filename
+character(len=512)                         :: particle_restart_filename
+character(len=512) :: jorek_filename
 procedure(real_f),pointer                 :: pdf_to_use         => NULL()
 procedure(real_f),pointer                 :: weight_to_use      => NULL()
 procedure(real_f),pointer                 :: gdf_to_use         => NULL()
@@ -91,7 +91,6 @@ Pitchbound  = [PI-2.95d-1,PI]
 Chibound    = [0.d0,TWOPI]
 Chargebound = -1.d0
 charge      = -1.d0
-allocate(character(len=25)::jorek_filename)
 jorek_filename          = 'jorek'
 particle_filename       = 'jorek_particle_outputs.txt'
 mesh_filename_root      = 'jorek_kinetic_mesh_'
@@ -99,11 +98,15 @@ particle_histo_filename = 'jorek_histogram_from_particles.txt'
 particle_pdf_filename   = 'jorek_pdf_from_particles.txt'
 exact_pdf_filename      = 'jorek_exact_pdf_at_midpoints.txt'
 particle_restart_filename = 'part_restart.h5'
+n_real_weight_param     = 0
 n_int_weight_param      = 0
 allocate(int_weight_param(0))
 n_int_pdf_param         = 0
 n_real_pdf_param        = 0
 sup_pdf_safety_factor   = 1d0
+
+! Optional initializer namelist; JOREK input remains on standard input.
+call read_initializer_inputs()
 
 !> Initialisation ---------------------------------------------------------------------------
 !> allocate arrays and initialise them to 0
@@ -202,6 +205,8 @@ if(trim(test_case)=='jorek_current_density_re' .or. trim(test_case)=='jorek_recu
 elseif(trim(test_case)=='uniform_weight') then
   write(*,*) 'SELECTED: WEIGHTED PDF UNIFORM!'
   n_real_pdf_param = 2; allocate(real_pdf_param(n_real_pdf_param));
+  real_pdf_param = 1.d0
+  n_real_weight_param = 2; allocate(real_weight_param(n_real_weight_param))
   n_int_pdf_to_part_coord_param  = 0
   n_real_pdf_to_part_coord_param = 0
   pdf_to_use        => pdf_uniform
@@ -1409,5 +1414,115 @@ function re_parallel_speed_normalized() result(vlight)
     sqrt(MU_ZERO * central_mass * ATOMIC_MASS_UNIT * central_density * 1.d20) * &
     sqrt(1.d0 - 1.d0/gamma_rel**2)
 end function re_parallel_speed_normalized
+
+
+!> Read optional command-line namelist once, then distribute it to every MPI rank.
+!> Usage: BINARY initializer.nml < JOREK_INPUT
+subroutine read_initializer_inputs()
+  use mpi
+  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+  implicit none
+  character(len=1024) :: input_filename,input_message
+  character(len=2048) :: input_text(128)
+  integer :: input_unit,input_status,arg_status,ierr
+  logical :: invalid_input
+  namelist /particle_initialization/ write_txt,do_verification,test_case,n_variables, &
+    n_particles,nR,nZ,nphi,np,npitch,nchi,start_time,mass,Rbound,Zbound,Phibound, &
+    Ekinbound,Pitchbound,Chibound,charge,jorek_filename,particle_filename, &
+    mesh_filename_root,particle_histo_filename,particle_pdf_filename, &
+    exact_pdf_filename,particle_restart_filename,sup_pdf_safety_factor
+
+  if (command_argument_count() == 0) return
+  input_status = 0
+  input_message = ''
+  input_text = ''
+  if (sim%my_id == 0) then
+    if (command_argument_count() /= 1) then
+      input_status = 1
+      input_message = 'Usage: BINARY initializer.nml < JOREK_INPUT'
+    else
+      call get_command_argument(1,input_filename,status=arg_status)
+      if (arg_status /= 0 .or. len_trim(input_filename) == 0) then
+        input_status = 1
+        input_message = 'Invalid or excessively long initializer input filename.'
+      else
+        open(newunit=input_unit,file=trim(input_filename),status='old',action='read', &
+          iostat=input_status,iomsg=input_message)
+        if (input_status == 0) then
+          read(input_unit,nml=particle_initialization,iostat=input_status,iomsg=input_message)
+          close(input_unit)
+        endif
+        if (input_status == 0) then
+          write(input_text,nml=particle_initialization,iostat=input_status,iomsg=input_message)
+        endif
+      endif
+    endif
+  endif
+  call MPI_Bcast(input_status,1,MPI_INTEGER,0,MPI_COMM_WORLD,ierr)
+  if (input_status /= 0) then
+    if (sim%my_id == 0) write(*,'(A)') 'ERROR reading initializer inputs: '//trim(input_message)
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  call MPI_Bcast(input_text,len(input_text)*size(input_text),MPI_CHARACTER,0,MPI_COMM_WORLD,ierr)
+  read(input_text,nml=particle_initialization,iostat=input_status,iomsg=input_message)
+  if (input_status /= 0) then
+    write(*,'(A,I0,2A)') 'ERROR decoding initializer inputs on rank ',sim%my_id,': ',trim(input_message)
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+
+  ! Structural dimensions are fixed by the selected binary.
+  invalid_input = n_variables /= 7 .or. n_particles < 1 .or. &
+    min(nR,nZ,nphi,np,npitch,nchi) < 2
+  invalid_input = invalid_input .or. .not. all(ieee_is_finite([start_time,mass,charge, &
+    sup_pdf_safety_factor,Rbound,Zbound,Phibound,Ekinbound,Pitchbound,Chibound]))
+  invalid_input = invalid_input .or. mass <= 0.d0 .or. start_time < 0.d0 .or. &
+    sup_pdf_safety_factor < 1.d0
+  if (invalid_input) then
+    if (sim%my_id == 0) write(*,'(A)') &
+      'ERROR: invalid initializer dimensions, counts, mesh sizes, mass, time, or PDF safety factor.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  invalid_input = Rbound(1) < 0.d0 .or. Rbound(2) <= Rbound(1) .or. &
+    Zbound(2) <= Zbound(1) .or. Phibound(2) <= Phibound(1) .or. &
+    Phibound(2)-Phibound(1) > TWOPI+1.d-10 .or. Ekinbound(1) < 0.d0 .or. &
+    Ekinbound(2) <= Ekinbound(1) .or. Pitchbound(1) < 0.d0 .or. &
+    Pitchbound(2) > PI .or. Pitchbound(2) <= Pitchbound(1)
+  invalid_input = invalid_input .or. Chibound(2) <= Chibound(1) .or. &
+    Chibound(2)-Chibound(1) > TWOPI+1.d-10
+  if (trim(test_case)=='jorek_recurrent_density_re') then
+    if (abs(Chibound(2)-Chibound(1)-TWOPI) > 1.d-10) then
+      if (sim%my_id == 0) write(*,'(A)') 'ERROR: the RE-current case requires uniform full gyro phase.'
+      call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+    endif
+  endif
+  ! The particle model stores one fixed integer charge in elementary-charge units.
+  invalid_input = invalid_input .or. abs(charge) < 1.d0 .or. abs(charge) > 127.d0
+  if (.not. invalid_input) invalid_input = abs(charge-real(nint(charge),kind=8)) > 1.d-10
+  if (invalid_input) then
+    if (sim%my_id == 0) write(*,'(A)') 'ERROR: invalid phase-space bounds or fixed integer charge.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  select case (trim(test_case))
+  case ('jorek_recurrent_density_re')
+    if (abs(Phibound(2)-Phibound(1)-TWOPI) > 1.d-10) then
+      if (sim%my_id == 0) write(*,'(A)') 'ERROR: the I_RE-normalized case requires a full toroidal interval.'
+      call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+    endif
+  case ('jorek_current_density_re','uniform_weight','uniform')
+    ! Supported alternatives; 'uniform' uses the default uniform-PDF branch.
+  case default
+    if (sim%my_id == 0) write(*,'(A)') 'ERROR: unknown initializer test_case: '//trim(test_case)
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  end select
+  if (len_trim(jorek_filename) == 0 .or. len_trim(particle_restart_filename) == 0) then
+    if (sim%my_id == 0) write(*,'(A)') 'ERROR: restart input basename and output filename must be nonempty.'
+    call MPI_Abort(MPI_COMM_WORLD,1,ierr)
+  endif
+  Chargebound = charge
+  if (sim%my_id == 0) then
+    write(*,'(A)') ' Initializer inputs: '//trim(input_filename)
+    write(*,nml=particle_initialization)
+  endif
+end subroutine read_initializer_inputs
 
 end program test_initialisation_phase_space

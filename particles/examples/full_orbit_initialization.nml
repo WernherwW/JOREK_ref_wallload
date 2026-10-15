@@ -1,0 +1,28 @@
+! Angles: radians; energy: eV; time: seconds; mass: AMU.
+! n_particles is the marker count on EACH MPI rank.
+&particle_initialization
+  write_txt = .true.
+  do_verification = .false.
+  test_case = 'jorek_recurrent_density_re'
+  n_variables = 7
+  n_particles = 1000000
+  nR = 2, nZ = 2, nphi = 2, np = 3, npitch = 3
+  nchi = 3
+  start_time = 0.044d0
+  mass = 5.48579909065d-4
+  Rbound = 0.d0, 999.d0
+  Zbound = -999.d0, 999.d0
+  Phibound = 0.d0, 6.283185307179586d0
+  Ekinbound = 1.99d6, 2.01d6
+  Pitchbound = 2.846592653589793d0, 3.141592653589793d0
+  Chibound = 0.d0, 6.283185307179586d0
+  charge = -1.d0
+  jorek_filename = 'jorek'
+  particle_filename = 'jorek_particle_outputs.txt'
+  mesh_filename_root = 'jorek_kinetic_mesh_'
+  particle_histo_filename = 'jorek_histogram_from_particles.txt'
+  particle_pdf_filename = 'jorek_pdf_from_particles.txt'
+  exact_pdf_filename = 'jorek_exact_pdf_at_midpoints.txt'
+  particle_restart_filename = 'part_restart.h5'
+  sup_pdf_safety_factor = 1.d0
+/
