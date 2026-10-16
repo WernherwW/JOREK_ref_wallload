@@ -372,7 +372,6 @@ contains
   logical,intent(in),optional          :: apply_dirichlet_condition_in
 
   type (type_element)      :: element
-  type (type_node)         :: nodes(n_vertex_max)
 
   real*8, allocatable      :: ELM(:,:)
   real*8     :: wgauss2(n_gauss)
@@ -383,7 +382,7 @@ contains
   real*8     :: p, p_s, p_t, p_ss, p_st, p_tt, p_x, p_y, p_xx, p_yy, p_p
   real*8     :: wst, area, volume, xjac, xjac_x, xjac_y, psi_x, psi_y
   real*8     :: Bgrad_p, Bgrad_v_star, BB2
-  integer    :: i, j, k, l, m, in, im, ilarge, index_large_i, index_large_k, inode, knode
+  integer    :: i, j, k, l, in, im, ilarge, index_large_i, index_large_k, inode, knode
   integer    :: nz_AA, n_AA, nz_bnd, i_elm, index_ij, index_kl, im_index, in_index, index1
   integer    :: ms, mt, mp, my_id, my_id_n, my_id_master, ierr, MPI_COMM_MUMPS
   logical    :: apply_dirichlet_condition
@@ -454,49 +453,47 @@ contains
     !$omp         wst, xjac, xjac_x, xjac_y, psi_x, psi_y, BB2, Bgrad_p, Bgrad_v_star,  &
     !$omp         index_ij, index_kl, ilarge, in_index, im_index,                       &
     !$omp         inode, index_large_i, knode, index_large_k)                           &
-    !$omp firstprivate(nodes)                                                           & 
     !$omp schedule(static) 
     do i_elm=1,element_list%n_elements
       
       ELM = 0.d0
 
       element = element_list%element(i_elm)
-      do m=1,n_vertex_max
-        call make_deep_copy_node(node_list%node(element%vertex(m)), nodes(m))
-      enddo
 
       ! Set up gauss points in this element
       x_g = 0.d0;   x_s = 0.d0;   x_t = 0.d0;   x_ss = 0.d0;   x_st = 0.d0;   x_tt = 0.d0
       y_g = 0.d0;   y_s = 0.d0;   y_t = 0.d0;   y_ss = 0.d0;   y_st = 0.d0;   y_tt = 0.d0
       psi_g = 0.d0; psi_s = 0.d0; psi_t = 0.d0; psi_ss = 0.d0; psi_st = 0.d0; psi_tt = 0.d0
 
+      ! Read shared nodes directly to avoid OpenMP copies of allocatable components.
       do i=1,n_vertex_max
+        inode = element%vertex(i)
         do j=1,n_degrees
           do ms=1, n_gauss
             do mt=1, n_gauss
-              x_g(ms,mt)  = x_g(ms,mt)  + nodes(i)%x(1,j,1) * element%size(i,j) * H(i,j,ms,mt)
-              x_s(ms,mt)  = x_s(ms,mt)  + nodes(i)%x(1,j,1) * element%size(i,j) * H_s(i,j,ms,mt)
-              x_t(ms,mt)  = x_t(ms,mt)  + nodes(i)%x(1,j,1) * element%size(i,j) * H_t(i,j,ms,mt)
+              x_g(ms,mt)  = x_g(ms,mt)  + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H(i,j,ms,mt)
+              x_s(ms,mt)  = x_s(ms,mt)  + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H_s(i,j,ms,mt)
+              x_t(ms,mt)  = x_t(ms,mt)  + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H_t(i,j,ms,mt)
 
-              x_ss(ms,mt) = x_ss(ms,mt) + nodes(i)%x(1,j,1) * element%size(i,j) * H_ss(i,j,ms,mt)
-              x_st(ms,mt) = x_st(ms,mt) + nodes(i)%x(1,j,1) * element%size(i,j) * H_st(i,j,ms,mt)
-              x_tt(ms,mt) = x_tt(ms,mt) + nodes(i)%x(1,j,1) * element%size(i,j) * H_tt(i,j,ms,mt)
+              x_ss(ms,mt) = x_ss(ms,mt) + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H_ss(i,j,ms,mt)
+              x_st(ms,mt) = x_st(ms,mt) + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H_st(i,j,ms,mt)
+              x_tt(ms,mt) = x_tt(ms,mt) + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H_tt(i,j,ms,mt)
 
-              y_g(ms,mt)  = y_g(ms,mt)  + nodes(i)%x(1,j,2) * element%size(i,j) * H(i,j,ms,mt)
-              y_s(ms,mt)  = y_s(ms,mt)  + nodes(i)%x(1,j,2) * element%size(i,j) * H_s(i,j,ms,mt)
-              y_t(ms,mt)  = y_t(ms,mt)  + nodes(i)%x(1,j,2) * element%size(i,j) * H_t(i,j,ms,mt)
+              y_g(ms,mt)  = y_g(ms,mt)  + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H(i,j,ms,mt)
+              y_s(ms,mt)  = y_s(ms,mt)  + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H_s(i,j,ms,mt)
+              y_t(ms,mt)  = y_t(ms,mt)  + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H_t(i,j,ms,mt)
 
-              y_ss(ms,mt) = y_ss(ms,mt) + nodes(i)%x(1,j,2) * element%size(i,j) * H_ss(i,j,ms,mt)
-              y_st(ms,mt) = y_st(ms,mt) + nodes(i)%x(1,j,2) * element%size(i,j) * H_st(i,j,ms,mt)
-              y_tt(ms,mt) = y_tt(ms,mt) + nodes(i)%x(1,j,2) * element%size(i,j) * H_tt(i,j,ms,mt)
+              y_ss(ms,mt) = y_ss(ms,mt) + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H_ss(i,j,ms,mt)
+              y_st(ms,mt) = y_st(ms,mt) + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H_st(i,j,ms,mt)
+              y_tt(ms,mt) = y_tt(ms,mt) + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H_tt(i,j,ms,mt)
 
-              psi_g(ms,mt)  = psi_g(ms,mt)  + nodes(i)%values(1,j,1) * element%size(i,j) * H(i,j,ms,mt)
-              psi_s(ms,mt)  = psi_s(ms,mt)  + nodes(i)%values(1,j,1) * element%size(i,j) * H_s(i,j,ms,mt)
-              psi_t(ms,mt)  = psi_t(ms,mt)  + nodes(i)%values(1,j,1) * element%size(i,j) * H_t(i,j,ms,mt)
+              psi_g(ms,mt)  = psi_g(ms,mt)  + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H(i,j,ms,mt)
+              psi_s(ms,mt)  = psi_s(ms,mt)  + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H_s(i,j,ms,mt)
+              psi_t(ms,mt)  = psi_t(ms,mt)  + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H_t(i,j,ms,mt)
 
-              psi_ss(ms,mt) = psi_ss(ms,mt) + nodes(i)%values(1,j,1) * element%size(i,j) * H_ss(i,j,ms,mt)
-              psi_st(ms,mt) = psi_st(ms,mt) + nodes(i)%values(1,j,1) * element%size(i,j) * H_st(i,j,ms,mt)
-              psi_tt(ms,mt) = psi_tt(ms,mt) + nodes(i)%values(1,j,1) * element%size(i,j) * H_tt(i,j,ms,mt)
+              psi_ss(ms,mt) = psi_ss(ms,mt) + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H_ss(i,j,ms,mt)
+              psi_st(ms,mt) = psi_st(ms,mt) + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H_st(i,j,ms,mt)
+              psi_tt(ms,mt) = psi_tt(ms,mt) + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H_tt(i,j,ms,mt)
             enddo
           enddo
         enddo
@@ -669,9 +666,6 @@ contains
           enddo
         enddo
       enddo
-      do m=1,n_vertex_max
-        call dealloc_node(nodes(m))
-      enddo
     enddo
     !$omp end parallel do
     ilarge = nz_AA
@@ -758,7 +752,6 @@ contains
   real*8, intent(out), dimension(:), allocatable :: integral_weights !< these will be filled with the volume of each basis function
   real*8, intent(out)                  :: area, volume
   type (type_element)      :: element
-  type (type_node)         :: nodes(n_vertex_max)
 
   real*8, allocatable      :: ELM(:,:)
   real*8     :: wgauss2(n_gauss)
@@ -770,7 +763,7 @@ contains
   real*8     :: wst, xjac, xjac_x, xjac_y, psi_x, psi_y
   real*8     :: Bgrad_p, Bgrad_v_star, BB2
   real*8     :: filter_n0, filter_hyper_n0, filter_parallel_n0, zonal_factor
-  integer    :: i, j, k, l, m, in, im, ilarge, index_large_i, index_large_k, inode, knode
+  integer    :: i, j, k, l, in, im, ilarge, index_large_i, index_large_k, inode, knode
   integer    :: nz_AA, n_AA, nz_bnd, i_elm, index_ij, index_kl, im_index, in_index, index1, index2, index_rhs
   integer    :: ms, mt, mp, my_id, my_id_n, my_id_master, ierr, MPI_COMM_MUMPS
   logical    :: halt(size(IEEE_USUAL,1)), do_facto
@@ -859,49 +852,47 @@ contains
     !$omp         wst, xjac, xjac_x, xjac_y, psi_x, psi_y, BB2, Bgrad_p, Bgrad_v_star,    &
     !$omp         index_ij, index_kl, ilarge, in_index, im_index, basisfunction_volume,   &
     !$omp         inode, index_large_i, knode, index_large_k, index_rhs)                  &
-    !$omp firstprivate(nodes)                                                             & 
     !$omp reduction(+:area,volume) schedule(static)
     do i_elm=1,element_list%n_elements
       
       ELM = 0.d0
 
       element = element_list%element(i_elm)
-      do m=1,n_vertex_max
-        call make_deep_copy_node(node_list%node(element%vertex(m)), nodes(m))
-      enddo
 
       ! Set up gauss points in this element
       x_g = 0.d0;   x_s = 0.d0;   x_t = 0.d0;   x_ss = 0.d0;   x_st = 0.d0;   x_tt = 0.d0
       y_g = 0.d0;   y_s = 0.d0;   y_t = 0.d0;   y_ss = 0.d0;   y_st = 0.d0;   y_tt = 0.d0
       psi_g = 0.d0; psi_s = 0.d0; psi_t = 0.d0; psi_ss = 0.d0; psi_st = 0.d0; psi_tt = 0.d0
 
+      ! Read shared nodes directly to avoid OpenMP copies of allocatable components.
       do i=1,n_vertex_max
+        inode = element%vertex(i)
         do j=1,n_degrees
           do ms=1, n_gauss
             do mt=1, n_gauss
-              x_g(ms,mt)  = x_g(ms,mt)  + nodes(i)%x(1,j,1) * element%size(i,j) * H(i,j,ms,mt)
-              x_s(ms,mt)  = x_s(ms,mt)  + nodes(i)%x(1,j,1) * element%size(i,j) * H_s(i,j,ms,mt)
-              x_t(ms,mt)  = x_t(ms,mt)  + nodes(i)%x(1,j,1) * element%size(i,j) * H_t(i,j,ms,mt)
+              x_g(ms,mt)  = x_g(ms,mt)  + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H(i,j,ms,mt)
+              x_s(ms,mt)  = x_s(ms,mt)  + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H_s(i,j,ms,mt)
+              x_t(ms,mt)  = x_t(ms,mt)  + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H_t(i,j,ms,mt)
 
-              x_ss(ms,mt) = x_ss(ms,mt) + nodes(i)%x(1,j,1) * element%size(i,j) * H_ss(i,j,ms,mt)
-              x_st(ms,mt) = x_st(ms,mt) + nodes(i)%x(1,j,1) * element%size(i,j) * H_st(i,j,ms,mt)
-              x_tt(ms,mt) = x_tt(ms,mt) + nodes(i)%x(1,j,1) * element%size(i,j) * H_tt(i,j,ms,mt)
+              x_ss(ms,mt) = x_ss(ms,mt) + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H_ss(i,j,ms,mt)
+              x_st(ms,mt) = x_st(ms,mt) + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H_st(i,j,ms,mt)
+              x_tt(ms,mt) = x_tt(ms,mt) + node_list%node(inode)%x(1,j,1) * element%size(i,j) * H_tt(i,j,ms,mt)
 
-              y_g(ms,mt)  = y_g(ms,mt)  + nodes(i)%x(1,j,2) * element%size(i,j) * H(i,j,ms,mt)
-              y_s(ms,mt)  = y_s(ms,mt)  + nodes(i)%x(1,j,2) * element%size(i,j) * H_s(i,j,ms,mt)
-              y_t(ms,mt)  = y_t(ms,mt)  + nodes(i)%x(1,j,2) * element%size(i,j) * H_t(i,j,ms,mt)
+              y_g(ms,mt)  = y_g(ms,mt)  + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H(i,j,ms,mt)
+              y_s(ms,mt)  = y_s(ms,mt)  + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H_s(i,j,ms,mt)
+              y_t(ms,mt)  = y_t(ms,mt)  + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H_t(i,j,ms,mt)
 
-              y_ss(ms,mt) = y_ss(ms,mt) + nodes(i)%x(1,j,2) * element%size(i,j) * H_ss(i,j,ms,mt)
-              y_st(ms,mt) = y_st(ms,mt) + nodes(i)%x(1,j,2) * element%size(i,j) * H_st(i,j,ms,mt)
-              y_tt(ms,mt) = y_tt(ms,mt) + nodes(i)%x(1,j,2) * element%size(i,j) * H_tt(i,j,ms,mt)
+              y_ss(ms,mt) = y_ss(ms,mt) + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H_ss(i,j,ms,mt)
+              y_st(ms,mt) = y_st(ms,mt) + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H_st(i,j,ms,mt)
+              y_tt(ms,mt) = y_tt(ms,mt) + node_list%node(inode)%x(1,j,2) * element%size(i,j) * H_tt(i,j,ms,mt)
 
-              psi_g(ms,mt)  = psi_g(ms,mt)  + nodes(i)%values(1,j,1) * element%size(i,j) * H(i,j,ms,mt)
-              psi_s(ms,mt)  = psi_s(ms,mt)  + nodes(i)%values(1,j,1) * element%size(i,j) * H_s(i,j,ms,mt)
-              psi_t(ms,mt)  = psi_t(ms,mt)  + nodes(i)%values(1,j,1) * element%size(i,j) * H_t(i,j,ms,mt)
+              psi_g(ms,mt)  = psi_g(ms,mt)  + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H(i,j,ms,mt)
+              psi_s(ms,mt)  = psi_s(ms,mt)  + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H_s(i,j,ms,mt)
+              psi_t(ms,mt)  = psi_t(ms,mt)  + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H_t(i,j,ms,mt)
 
-              psi_ss(ms,mt) = psi_ss(ms,mt) + nodes(i)%values(1,j,1) * element%size(i,j) * H_ss(i,j,ms,mt)
-              psi_st(ms,mt) = psi_st(ms,mt) + nodes(i)%values(1,j,1) * element%size(i,j) * H_st(i,j,ms,mt)
-              psi_tt(ms,mt) = psi_tt(ms,mt) + nodes(i)%values(1,j,1) * element%size(i,j) * H_tt(i,j,ms,mt)
+              psi_ss(ms,mt) = psi_ss(ms,mt) + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H_ss(i,j,ms,mt)
+              psi_st(ms,mt) = psi_st(ms,mt) + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H_st(i,j,ms,mt)
+              psi_tt(ms,mt) = psi_tt(ms,mt) + node_list%node(inode)%values(1,j,1) * element%size(i,j) * H_tt(i,j,ms,mt)
 
             enddo
           enddo
@@ -1045,6 +1036,8 @@ contains
 
           index_rhs = 2*(node_list%node(inode)%index(j)-1) + 1   ! base index in the main matrix
 
+          ! Adjacent elements contribute to the same nodal integration weight.
+          !$omp atomic update
           integral_weights(index_rhs) = integral_weights(index_rhs) + basisfunction_volume(i,j)
 
           do im =1, 2
@@ -1091,9 +1084,6 @@ contains
             enddo
           enddo
         enddo
-      enddo
-      do m=1,n_vertex_max
-        call dealloc_node(nodes(m))
       enddo
     enddo
     !$omp end parallel do
