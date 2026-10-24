@@ -332,6 +332,7 @@ module mod_strumpack
       deallocate(distr)
       dist_c = c_loc(spss%distr)
       
+      call check_finite_strumpack(spss, a_mat%val(1:nnz_d), 'matrix before set_mat')
       call spk_set_mat(n_d,dist_c,irn_c,jcn_c,val_c,spss%sscp,spss%comm,upd)
 
       call MPI_Barrier(spss%comm,ierr)
@@ -392,6 +393,8 @@ module mod_strumpack
         call MPI_Bcast(rhs_vec%val, rhs_vec%n*rhs_vec%nrhs, MPI_DOUBLE_PRECISION, 0, spss%comm, ierr)
       endif
 
+      call check_finite_strumpack(spss, rhs_vec%val, 'RHS before solve')
+
       rhs_c = c_loc(rhs_vec%val);
       dist_c = c_loc(spss%distr)
 
@@ -403,8 +406,30 @@ module mod_strumpack
 
       call MPI_Barrier(spss%comm,ierr)
 
+      call check_finite_strumpack(spss, rhs_vec%val, 'solution after solve')
+
       return
     end subroutine strumpack_solve
+
+    ! Fail collectively before invalid data can propagate into another solver.
+    subroutine check_finite_strumpack(spss, values, stage)
+      use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
+      implicit none
+      type(type_STRUMPACK_SOLVER), intent(in) :: spss
+      real*8, intent(in) :: values(:)
+      character(len=*), intent(in) :: stage
+      logical :: local_bad, global_bad
+      integer :: rank, ierr
+
+      local_bad = any(.not. ieee_is_finite(values))
+      call MPI_Allreduce(local_bad, global_bad, 1, MPI_LOGICAL, MPI_LOR, spss%comm, ierr)
+      if (global_bad) then
+        call MPI_COMM_RANK(spss%comm, rank, ierr)
+        if (local_bad) write(*,*) 'FATAL: non-finite STRUMPACK ', stage, &
+                                 ', rank=', rank, ', projection=', spss%projection
+        call MPI_ABORT(spss%comm, 1, ierr)
+      endif
+    end subroutine check_finite_strumpack
 
 !> Finalize strumpack solver instance
     subroutine strumpack_finalize(spss)

@@ -93,6 +93,10 @@ contains
     ! reinitialise the storage node_list to ensure all projections fit
     do i=1, this%node_list%n_nodes
       call init_node(this%node_list%node(i), n_rhs_f+n_rhs)
+      ! init_node allocates storage without defining its contents. The solution
+      ! update below reads values when computing deltas, including unused RHSs.
+      this%node_list%node(i)%values = 0.d0
+      this%node_list%node(i)%deltas = 0.d0
     enddo
 
     this%rhs_vec%nrhs = (n_rhs + n_rhs_f)
