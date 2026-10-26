@@ -91,7 +91,7 @@ contains
     real*8  :: t0, t1, ostart, oend, mmm(3), mmm2(3)
     real*8,  allocatable :: my_rhs(:,:), y_tmp(:)
     integer, allocatable :: recv_counts(:), recv_disp(:)
-    integer :: n_rhs, n_rhs_f, i_rhs, n_tor_local, i_tor_local, n_loc_n
+    integer :: n_rhs, n_rhs_f, i_rhs, n_tor_local, i_tor_local, n_loc_n, n_masters
     integer :: in_local, in_global, index_n, id_master_in_world, offset, i_glob1, i_glob2
     logical :: halt(size(IEEE_USUAL,1)), found_nan
 
@@ -246,18 +246,21 @@ contains
     
       allocate(y_tmp(n_loc_n*(n_tor+1)))            ! allocate only on my_id=0???
 
-      allocate(recv_counts(this%n_mpi/this%m_mpi))
-      allocate(recv_disp(this%n_mpi/this%m_mpi))
+      ! The last harmonic group can be smaller than m_mpi. Integer division
+      ! of n_mpi by m_mpi then undercounts the masters communicator.
+      call MPI_COMM_SIZE(this%mpi_comm_master, n_masters, ierr)
+      allocate(recv_counts(n_masters))
+      allocate(recv_disp(n_masters))
       
       y_tmp = 0.d0
 
       recv_counts(1) = n_loc_n
-      do i=2,(n_tor+1)/2
+      do i=2,n_masters
         recv_counts(i) = n_loc_n
       enddo
 
       recv_disp(1) = 0
-      do i=2,(n_tor+1)/2
+      do i=2,n_masters
         recv_disp(i) = recv_disp(i-1) + recv_counts(i-1)
       enddo
 
