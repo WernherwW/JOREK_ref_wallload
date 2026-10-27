@@ -151,7 +151,7 @@ endif ! (restart_particles)
 
 
 ! Read Open ADAS data for plasma fluid
-if (deuterium_adas .and. use_kin_recomb_global) ad_deuterium =  read_adf11(sim%my_id,'96_h') !< move to core (jorek2_main for particles)
+if (deuterium_adas) ad_deuterium =  read_adf11(sim%my_id,'96_h') !< move to core (jorek2_main for particles)
 
 #if (defined WITH_Impurities)
   ! --- Read ADAS data and generate coronal equilibrium if needed
