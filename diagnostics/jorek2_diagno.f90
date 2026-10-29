@@ -93,6 +93,8 @@ endif
 #if (defined WITH_Neutrals) || (defined WITH_Impurities)
   ! --- Read ADAS data and generate coronal equilibrium if needed
   call init_imp_adas(my_id)
+#else
+  if (use_imp_adas .and. any(nimp_bg(1:n_adas) > 0.d0)) call init_imp_adas(my_id)
 #endif
 
 

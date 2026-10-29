@@ -55,7 +55,7 @@ use phys_module, only: deuterium_adas,sqrt_mu0_over_rho0
 use phys_module, only: filter_perp, filter_hyper, filter_par, filter_perp_n0, filter_hyper_n0, filter_par_n0
 use phys_module, only: apply_dirichlet_proj, part_group_configs, init_particles_only
 use phys_module, only: use_manual_random_seed, manual_seed
-use phys_module, only: use_imp_adas, nimp_bg 
+use phys_module, only: use_imp_adas, nimp_bg, n_adas
 
 use mod_particle_group_id, only: matching_part_config_indices
 
@@ -157,7 +157,7 @@ if (deuterium_adas) ad_deuterium =  read_adf11(sim%my_id,'96_h') !< move to core
   ! --- Read ADAS data and generate coronal equilibrium if needed
   call init_imp_adas(sim%my_id)
 #else
-  if (use_imp_adas .and. (nimp_bg(1) > 0.d0)) then
+  if (use_imp_adas .and. any(nimp_bg(1:n_adas) > 0.d0)) then
     call init_imp_adas(sim%my_id)
   endif
 #endif
