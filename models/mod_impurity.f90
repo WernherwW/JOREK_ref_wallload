@@ -34,7 +34,7 @@ module mod_impurity
     end if
 
     allocate (imp_cor(n_adas))  !< Dynamically allocate memeries for adas data
-    if (nimp_bg(1) .gt. 0 .or. with_impurities) then
+    if (any(nimp_bg(1:n_adas) > 0.d0) .or. with_impurities) then
       do i=1, n_adas
         select case ( trim(imp_type(i)) )
           case('C')

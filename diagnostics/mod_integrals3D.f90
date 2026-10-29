@@ -205,12 +205,12 @@ real*8  :: source_neutral_arr(n_inj_max), source_neutral_drift_arr(n_inj_max)
 real*8  :: source_bg, source_imp, source_bg_drift, source_imp_drift
 real*8  :: source_bg_arr(n_inj_max), source_imp_arr(n_inj_max), source_bg_drift_arr(n_inj_max), source_imp_drift_arr(n_inj_max) 
 #endif
-#if (defined WITH_Neutrals) || (defined WITH_Impurities)
 real*8  :: local_radiation, local_radiation_cooling, local_radiation_bg, local_E_ion, total_radiation, total_radiation_cooling, total_radiation_bg, total_E_ion, local_P_ei, total_P_ei
 real*8  :: local_P_ion, total_P_ion
 real*8  :: local_radiation_phi(n_plane), local_radiation_cooling_phi(n_plane), total_radiation_phi(n_plane), total_radiation_cooling_phi(n_plane)
 real*8  :: ne_SI, Te_eV, Te_corr_eV, Ti_eV
 
+#if (defined WITH_Neutrals) || (defined WITH_Impurities)
 ! SPI-related variables
 integer    :: spi_i
 integer    :: i_inj,  n_spi_tmp
@@ -264,14 +264,11 @@ real*8     :: LradDcont_T, dLradDcont_dT                      ! Continuum (Brem.
 real*8     :: LradDcont_corr, dLradDcont_dT_corr              ! LradDcont_T corrected for potential extra counting of dielectronic cascade energy loss
                                                               ! (see mod_atomic_coeff_deuterium for more details)
 !   -Radiation from background impurities
-real*8     :: Arad_bg, Brad_bg, Crad_bg                       ! Retain hard-coded fitting for argon
 real*8     :: coef_prad_si                                    ! Prad,SI = coef_prad_si * Prad,jorek
 #endif
 
-#if (defined WITH_Neutrals) || (defined WITH_Impurities)
 integer    :: i_imp, i_phi                                    ! Loop for more than one background impurity
-real*8     :: frad_bg, Lrad_imp                               ! Retain hard-coded fitting for argon
-#endif
+real*8     :: frad_bg, Lrad_imp                               ! Background radiation in SI units
 
 ! SAW energy functional (linear MHD)
 real*8     :: SAW_tot, saw_energy_tot, saw_ene_dens, BB2_zero
@@ -395,7 +392,6 @@ local_aux_mom_par_int = 0.d0
 local_aux_mom_par_ext = 0.d0 
 local_aux_mom_par_tot = 0.d0 
 
-#if (defined WITH_Neutrals) || (defined WITH_Impurities)
 local_radiation             = 0.d0 ! Radiation power (as would be measured by a bolometer, i.e. uses LradDCont_T)
 local_radiation_cooling     = 0.d0 ! Radiative cooling power (radiative energy lost from the plasma, i.e. uses LradDcont_corr)
 local_radiation_bg          = 0.d0
@@ -406,6 +402,7 @@ local_E_ion           = 0.d0
 local_P_ei            = 0.d0
 local_P_ion           = 0.d0
 
+#if (defined WITH_Neutrals) || (defined WITH_Impurities)
 if (using_spi) then
    if (allocated(local_source_volume)) then
       deallocate(local_source_volume)
@@ -474,14 +471,12 @@ Tie_min_neg = 0.5*T_min_neg
 !$omp          using_spi, n_spi_tot, n_inj, n_spi,                                                            &
 !$omp          pellets, ns_radius_ratio, ns_radius_min,                                                       &
 !$omp          local_n_particles_inj, local_n_particles, ns_amplitude, ns_R, ns_Z,                            &
-!$omp          ns_phi, ns_radius, ns_deltaphi, ns_delta_minor_rad, ns_tor_norm, spi_tor_rot, local_E_ion,     &
-!$omp          t_now, A_Dmv, K_Dmv, V_Dmv, P_Dmv, t_ns, L_tube, JET_MGI,ASDEX_MGI, local_P_ion,               &
-!$omp          local_radiation, local_radiation_phi, imp_cor, imp_adas, imp_type, local_P_ei,                 &
-!$omp          n_adas, nimp_bg, local_radiation_cooling, local_radiation_cooling_phi, local_radiation_bg,     &
+!$omp          ns_phi, ns_radius, ns_deltaphi, ns_delta_minor_rad, ns_tor_norm, spi_tor_rot,     &
+!$omp          t_now, A_Dmv, K_Dmv, V_Dmv, P_Dmv, t_ns, L_tube, JET_MGI,ASDEX_MGI,               &
 #endif
-#if (defined WITH_Neutrals) && (!defined WITH_Impurities)
-!$omp          use_imp_adas,                                                                                  &
-#endif
+!$omp          use_imp_adas, imp_cor, imp_adas, imp_type, n_adas, nimp_bg,                                   &
+!$omp          local_radiation, local_radiation_phi, local_radiation_bg, local_P_ei, local_E_ion, local_P_ion, &
+!$omp          local_radiation_cooling, local_radiation_cooling_phi,                                          &
 #if (defined WITH_Impurities)
 !$omp          index_main_imp,                                                                                &
 #endif
@@ -510,8 +505,8 @@ Tie_min_neg = 0.5*T_min_neg
 !$omp           aux_P0, aux_P0_s, aux_P0_t, aux_P0_p, aux_q0, aux_jx0, aux_jy0, aux_jz0, aux_jz0_pcs,         &
 !$omp           eta_T_ohm, rn0, rn0_corr, rimp0, rimp0_corr, Z_eff, lnA, alpha_e,                             &
 !$omp           aux_E0_Ti, aux_E0_Te, aux_E0,                                                                 &
-#if (defined WITH_Neutrals) || (defined WITH_Impurities)
 !$omp           i_imp, frad_bg, Lrad_imp, Te_corr_eV, Te_eV, ne_SI, Ti_eV,                                    &
+#if (defined WITH_Neutrals) || (defined WITH_Impurities)
 !$omp           spi_R_tmp, spi_Z_tmp, spi_phi_tmp, ns_radius_tmp,                                             &
 !$omp           spi_psi_tmp, spi_grad_psi_tmp, spi_i, i_inj,                                                  &
 !$omp           n_spi_tmp, source_tmp, ns_shape, ns_shape_drift,                                              &
@@ -535,7 +530,6 @@ Tie_min_neg = 0.5*T_min_neg
 !$omp           source_neutral_drift, source_neutral_arr, source_neutral_drift_arr,                           &
 !$omp           LradDrays_T, LradDcont_T, dLradDrays_dT, dLradDcont_dT,                                       &
 !$omp           LradDcont_corr, dLradDcont_dT_corr,                                                           &
-!$omp           Arad_bg, Brad_bg, Crad_bg,                                                                    &
 !$omp           coef_prad_si,                                                                                 &
 #endif
 !$omp           omp_nthreads,omp_tid)                                                                         &
@@ -554,9 +548,11 @@ omp_tid      = 0
 !$omp do reduction(+:local_pellet_particles, local_plasma_particles, local_pellet_volume,     &
 #if (defined WITH_Neutrals) || (defined WITH_Impurities)
 !$omp                local_n_particles_inj,  local_n_particles,                               &
-!$omp                local_radiation, local_radiation_phi, local_E_ion, local_P_ei, local_P_ion, &
-!$omp                local_source_volume, local_source_volume_drift, local_radiation_bg,      &
+!$omp                local_source_volume, local_source_volume_drift,      &
 #endif
+!$omp                local_radiation, local_radiation_phi, local_radiation_bg,                 &
+!$omp                local_radiation_cooling, local_radiation_cooling_phi,                      &
+!$omp                local_E_ion, local_P_ei, local_P_ion,                                       &
 !$omp                D_int, D_ext, P_int, H_int, S_int, H_ext, S_ext, P_ext, C_intern, C_ext, &
 !$omp                P_e_int, P_i_int, P_e_ext, P_i_ext, P_e_tot, P_i_tot,                    &
 !$omp                mag_pres_tot, mag_pres_int, mag_pres_ext,                                &
@@ -950,77 +946,18 @@ aux_q0    = 0.d0; aux_jx0   = 0.d0; aux_jy0   = 0.d0; aux_jz0   = 0.d0; aux_jz0_
       
         ksi_ion_norm = central_density * 1.d20 * ksi_ion   ! Normalisation of the ionization energy cost for Deuterium
       
-        ! --- Radiation from background impurity
-        ne_SI = r0_corr * 1.d20 * central_density !electron density (SI)
-
-        if (with_TiTe) then 
-          Te_corr_eV =       Te0_corr/(EL_CHG*MU_ZERO*central_density*1.d20)  ! Te in eV
-          Te_eV =       Te0/(EL_CHG*MU_ZERO*central_density*1.d20)  ! Te in eV, uncorrected
-        else
-          Te_corr_eV = 0.5d0* T0_corr/(EL_CHG*MU_ZERO*central_density*1.d20)  ! Te in eV
-          Te_eV = 0.5d0* T0/(EL_CHG*MU_ZERO*central_density*1.d20)  ! Te in eV, uncorrected
-        endif
-
-        if (use_imp_adas) then  ! use open adas by default  
-          ! Use radiation coefficients from ADAS
-          frad_bg = 0. 
-          do i_imp = 1, n_adas     
-            if (ne_SI > ne_SI_min .and. Te_eV > Te_eV_min .and. nimp_bg(i_imp) > 0) then
-              Lrad_imp = 0.0
-              call radiation_function_linear(imp_adas(i_imp),imp_cor(i_imp),log10(ne_SI),    & 
-                                           log10(Te_corr_eV*EL_CHG/K_BOLTZ),.false.,Lrad_imp)           
-            else     
-              Lrad_imp = 0.
-            end if
-            frad_bg = frad_bg + nimp_bg(i_imp) * Lrad_imp
-          end do
-
-          local_radiation_phi(mp)         = local_radiation_phi(mp) + ( (r0_corr * rn0_corr  * LradDrays_T    &
-                                            + r0_corr ** 2 * LradDcont_T) * coef_prad_si                      & 
-                                            + ne_SI * frad_bg) * bigR * xjac * wst * delta_phi 
-          local_radiation_cooling_phi(mp) = local_radiation_cooling_phi(mp) + ( (r0_corr * rn0_corr  * LradDrays_T    &
-                                            + r0_corr ** 2 * LradDcont_corr) * coef_prad_si                           & 
-                                            + ne_SI * frad_bg) * bigR * xjac * wst * delta_phi                               
-                                     
-          local_radiation                 = local_radiation + ( (r0_corr * rn0_corr  * LradDrays_T            &
-                                            + r0_corr ** 2 * LradDcont_T) * coef_prad_si                      & 
-                                            + ne_SI * frad_bg) * bigR * xjac * wst * delta_phi 
-          local_radiation_cooling         = local_radiation_cooling + ( (r0_corr * rn0_corr  * LradDrays_T    &
-                                            + r0_corr ** 2 * LradDcont_corr) * coef_prad_si                   & 
-                                            + ne_SI * frad_bg) * bigR * xjac * wst * delta_phi 
-
-          local_P_ion             = local_P_ion + ksi_ion_norm * r0_corr * rn0_corr * Sion_T * coef_prad_si &
-                                   * bigR * xjac * wst * delta_phi
-        else
-          if ( trim(imp_type(1)) == 'Ar') then ! Hard-coded fitting exists for argon
-            Arad_bg = 2.4d-31 
-            Brad_bg = 20.
-            Crad_bg = 0.8
-            frad_bg = (2./3.)*(1./(central_mass*ATOMIC_MASS_UNIT))*((MU_ZERO*central_mass*ATOMIC_MASS_UNIT*central_density*1.d20)**(1.5d0))                &
-                            *nimp_bg(1)*Arad_bg*exp(-((log(Te_corr_eV)-log(Brad_bg))**2.)/Crad_bg**2.)
-                    
-            local_radiation_phi(mp)         = local_radiation_phi(mp) + (r0_corr * rn0_corr  * LradDrays_T         &
-                                              + r0_corr ** 2 * LradDcont_T + r0_corr * frad_bg) * coef_prad_si     & 
-                                              * bigR * xjac * wst * delta_phi  
-            local_radiation_cooling_phi(mp) = local_radiation_cooling_phi(mp) + (r0_corr * rn0_corr  * LradDrays_T &
-                                              + r0_corr ** 2 * LradDcont_corr + r0_corr * frad_bg) * coef_prad_si  & 
-                                              * bigR * xjac * wst * delta_phi  
-
-            local_radiation                 = local_radiation + (r0_corr * rn0_corr  * LradDrays_T &
-                                              + r0_corr ** 2 * LradDcont_T + r0_corr * frad_bg) * coef_prad_si & 
-                                              * bigR * xjac * wst * delta_phi 
-            local_radiation_cooling         = local_radiation_cooling + (r0_corr * rn0_corr  * LradDrays_T &
-                                              + r0_corr ** 2 * LradDcont_corr + r0_corr * frad_bg) * coef_prad_si & 
-                                              * bigR * xjac * wst * delta_phi 
-
-            local_P_ion             = local_P_ion + ksi_ion_norm * r0_corr * rn0_corr * Sion_T * coef_prad_si &
-                                       * bigR * xjac * wst * delta_phi
-          else
-            write(*,*) "WARNING: hard-coded fitting doesn't exist for  ", trim(imp_type(1)), ", use open adas instead!"
-            stop
-          end if
-        end if
-
+        local_radiation_phi(mp) = local_radiation_phi(mp) + (r0_corr * rn0_corr * LradDrays_T &
+                               + r0_corr**2 * LradDcont_T) * coef_prad_si * bigR * xjac * wst * delta_phi
+        local_radiation = local_radiation + (r0_corr * rn0_corr * LradDrays_T &
+                        + r0_corr**2 * LradDcont_T) * coef_prad_si * bigR * xjac * wst * delta_phi
+        local_radiation_cooling_phi(mp) = local_radiation_cooling_phi(mp) &
+                        + (r0_corr * rn0_corr * LradDrays_T + r0_corr**2 * LradDcont_corr) &
+                        * coef_prad_si * bigR * xjac * wst * delta_phi
+        local_radiation_cooling = local_radiation_cooling &
+                        + (r0_corr * rn0_corr * LradDrays_T + r0_corr**2 * LradDcont_corr) &
+                        * coef_prad_si * bigR * xjac * wst * delta_phi
+        local_P_ion = local_P_ion + ksi_ion_norm * r0_corr * rn0_corr * Sion_T &
+                    * coef_prad_si * bigR * xjac * wst * delta_phi
 #endif
 
 #ifdef WITH_Impurities
@@ -1130,27 +1067,14 @@ aux_q0    = 0.d0; aux_jx0   = 0.d0; aux_jy0   = 0.d0; aux_jz0   = 0.d0; aux_jz0_
         Lrad = Lrad * m_i_over_m_imp
         E_ion = E_ion * m_i_over_m_imp
 
-        frad_bg = 0. 
-        do i_imp = 1, n_adas     
-          if (i_imp == index_main_imp) cycle
-          if (ne_SI > ne_SI_min .and. Te_eV > Te_eV_min .and. nimp_bg(i_imp) > 0) then
-            Lrad_imp = 0.0
-            call radiation_function_linear(imp_adas(i_imp),imp_cor(i_imp),log10(ne_SI),    & 
-                                         log10(Te_eV*EL_CHG/K_BOLTZ),.false.,Lrad_imp)           
-          else     
-            Lrad_imp = 0.
-          end if
-          frad_bg = frad_bg + nimp_bg(i_imp) * Lrad_imp
-        end do
-
         local_radiation_phi(mp) = local_radiation_phi(mp) &
-                                  + ne_SI * (rimp0_corr * central_density * 1.d20 * Lrad + frad_bg)&
-                                  * bigR * xjac * wst * delta_phi        
+                      + ne_SI * rimp0_corr * central_density * 1.d20 * Lrad * bigR * xjac * wst * delta_phi
         local_radiation = local_radiation &
-                          + ne_SI * (rimp0_corr * central_density * 1.d20 * Lrad + frad_bg)&
-                          * bigR * xjac * wst * delta_phi 
-        local_radiation_bg = local_radiation_bg &
-                             + ne_SI * frad_bg * bigR * xjac * wst * delta_phi 
+                      + ne_SI * rimp0_corr * central_density * 1.d20 * Lrad * bigR * xjac * wst * delta_phi
+        local_radiation_cooling_phi(mp) = local_radiation_cooling_phi(mp) &
+                      + ne_SI * rimp0_corr * central_density * 1.d20 * Lrad * bigR * xjac * wst * delta_phi
+        local_radiation_cooling = local_radiation_cooling &
+                      + ne_SI * rimp0_corr * central_density * 1.d20 * Lrad * bigR * xjac * wst * delta_phi
         local_E_ion     = local_E_ion + rimp0 * central_density * 1.d20 * E_ion             &
                           * bigR * xjac * wst * delta_phi
         local_E_ion     = local_E_ion + (r0 - rimp0) * central_density * 1.d20 * E_ion_bg   &
@@ -1185,6 +1109,47 @@ aux_q0    = 0.d0; aux_jx0   = 0.d0; aux_jy0   = 0.d0; aux_jz0   = 0.d0; aux_jz0_
         local_P_ei = local_P_ei + ne_SI * dTe_i * bigR * xjac * wst * delta_phi 
 #endif /* WITH_TiTe */
 #endif /* WITH_Impurities */
+
+        ! Fixed background impurities radiate independently of the evolved fluid species.
+#ifndef WITH_Impurities
+        ne_SI = r0_corr * central_density * 1.d20
+#endif
+        if (with_TiTe) then
+          Te_eV = Te0 / (EL_CHG * MU_ZERO * central_density * 1.d20)
+          Te_corr_eV = Te0_corr / (EL_CHG * MU_ZERO * central_density * 1.d20)
+        else
+          Te_eV = 0.5d0 * T0 / (EL_CHG * MU_ZERO * central_density * 1.d20)
+          Te_corr_eV = 0.5d0 * T0_corr / (EL_CHG * MU_ZERO * central_density * 1.d20)
+        endif
+        frad_bg = 0.d0
+        if (use_imp_adas .or. with_impurities) then
+          do i_imp = 1, n_adas
+#ifdef WITH_Impurities
+            if (i_imp == index_main_imp) cycle
+#endif
+            if (ne_SI > ne_SI_min .and. Te_eV > Te_eV_min .and. nimp_bg(i_imp) > 0.d0) then
+              call radiation_function_linear(imp_adas(i_imp), imp_cor(i_imp), log10(ne_SI), &
+                   log10(Te_corr_eV * EL_CHG / K_BOLTZ), .false., Lrad_imp)
+              frad_bg = frad_bg + nimp_bg(i_imp) * Lrad_imp
+            endif
+          enddo
+#if (defined WITH_Neutrals) && (!defined WITH_Impurities)
+        else
+          ! Preserve the analytic argon radiation option used by the fluid-neutral model.
+          if (trim(imp_type(1)) /= 'Ar') then
+            write(*,*) "WARNING: hard-coded fitting doesn't exist for ", trim(imp_type(1)), ", use open adas instead!"
+            stop
+          endif
+          frad_bg = (2.d0 / (3.d0 * (GAMMA-1.d0))) * nimp_bg(1) * 2.4d-31 &
+                  * exp(-((log(Te_corr_eV)-log(20.d0)) / 0.8d0)**2)
+#endif
+        endif
+        local_radiation_bg = local_radiation_bg + ne_SI * frad_bg * bigR * xjac * wst * delta_phi
+        local_radiation = local_radiation + ne_SI * frad_bg * bigR * xjac * wst * delta_phi
+        local_radiation_phi(mp) = local_radiation_phi(mp) + ne_SI * frad_bg * bigR * xjac * wst * delta_phi
+        local_radiation_cooling = local_radiation_cooling + ne_SI * frad_bg * bigR * xjac * wst * delta_phi
+        local_radiation_cooling_phi(mp) = local_radiation_cooling_phi(mp) &
+                                      + ne_SI * frad_bg * bigR * xjac * wst * delta_phi
 
 #if (! defined WITH_Impurities)
         Z_eff      = 1.d0
@@ -2205,7 +2170,6 @@ call MPI_AllReduce(local_aux_mom_par_int,aux_mom_par_int,1,MPI_DOUBLE_PRECISION,
 call MPI_AllReduce(local_aux_mom_par_ext,aux_mom_par_ext,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
 call MPI_AllReduce(local_aux_mom_par_tot,aux_mom_par_tot,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
 
-#if (defined WITH_Neutrals) || (defined WITH_Impurities)
 call MPI_AllReduce(local_radiation, total_radiation,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
 call MPI_AllReduce(local_radiation_cooling, total_radiation_cooling,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
 call MPI_AllReduce(local_radiation_bg, total_radiation_bg,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
@@ -2214,7 +2178,6 @@ call MPI_AllReduce(local_P_ei, total_P_ei,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COM
 call MPI_AllReduce(local_P_ion, total_P_ion,1,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
 call MPI_AllReduce(local_radiation_phi, total_radiation_phi,n_plane,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
 call MPI_AllReduce(local_radiation_cooling_phi, total_radiation_cooling_phi,n_plane,MPI_DOUBLE_PRECISION,MPI_SUM,MPI_COMM_WORLD,ierr)
-#endif /* (defined WITH_Neutrals) || (defined WITH_Impurities) */
 
 #else /* NOMPIVERSION */
 density_in           = D_int
@@ -2293,7 +2256,6 @@ aux_mom_par_int = local_aux_mom_par_int
 aux_mom_par_ext = local_aux_mom_par_ext
 aux_mom_par_tot = local_aux_mom_par_tot
 
-#if (defined WITH_Neutrals) || (defined WITH_Impurities)
 total_radiation             = local_radiation
 total_radiation_cooling     = local_radiation_cooling
 total_radiation_bg          = local_radiation_bg
@@ -2302,7 +2264,6 @@ total_P_ei                  = local_P_ei
 total_P_ion                 = local_P_ion
 total_radiation_phi         = local_radiation_phi
 total_radiation_cooling_phi = local_radiation_cooling_phi 
-#endif /* (defined WITH_Neutrals) || (defined WITH_Impurities) */
 #endif /* NOMPIVERSION */
 
 if (use_pellet) then
@@ -2448,7 +2409,6 @@ aux_mom_par_int      = n_period * aux_mom_par_int * rho_norm / t_norm
 aux_mom_par_ext      = n_period * aux_mom_par_ext * rho_norm / t_norm
 aux_mom_par_tot      = n_period * aux_mom_par_tot * rho_norm / t_norm
 
-#if (defined WITH_Neutrals) || (defined WITH_Impurities)
 total_radiation             = n_period * total_radiation
 total_radiation_cooling     = n_period * total_radiation_cooling
 total_radiation_bg          = n_period * total_radiation_bg
@@ -2457,7 +2417,6 @@ total_radiation_cooling_phi = n_period * total_radiation_cooling_phi
 total_E_ion                 = n_period * total_E_ion
 total_P_ei                  = n_period * total_P_ei
 total_P_ion                 = n_period * total_P_ion
-#endif
 
 ! --- Boundary integrals
 vn_p0                =  n_period * vn_p0          * fact_flux 
@@ -2705,13 +2664,11 @@ if (my_id .eq. 0) then
       case ( 'saw_ene' )
         res(iexpr) = saw_energy_tot
 
-#if (defined WITH_Neutrals) || (defined WITH_Impurities)
       case ( 'Rad_tot' )
         res(iexpr) = total_radiation
 
       case ( 'Rad_bg_tot' )
         res(iexpr) = total_radiation_bg
-#endif
 
       case ( 'P_vn' )
         res(iexpr) = vn_p0 
@@ -2830,13 +2787,8 @@ if (my_id .eq. 0) then
       case ( 'LCFS_deltaL' )
         res(iexpr) = ES%LCFS_deltaL
 
-#if (defined WITH_Neutrals) || (defined WITH_Impurities)
       case ( 'tot_radiated' )
         res(iexpr) = total_radiation
-#else
-      case ( 'tot_radiated' )
-        res(iexpr) = 0.d0 
-#endif
 
     end select
             
@@ -2953,6 +2905,8 @@ if (my_id .eq. 0) then
 
 #if (defined WITH_Neutrals) || (defined WITH_Impurities)
   write(*,'(A,4es14.6)')   ' Integrals_3D, MGI              : ', total_n_particles_inj, total_n_particles
+#endif
+  if (with_neutrals .or. with_impurities .or. (use_imp_adas .and. any(nimp_bg(1:n_adas) > 0.d0))) then
   write(*,'(A,1e14.6,A)')  ' Radiation power (incl. backgr. imp) : ', total_radiation/1.d6, ' [MW]'
   write(*,'(A,1e14.6,A)')  ' Radiation power BACKGROUND     : ', total_radiation_bg/1.d6, ' [MW]'
   write(*,'(A,1e14.6,A)')  ' Radiation power SANITY         : ', sum(total_radiation_phi)/1.d6, ' [MW]'
@@ -2967,6 +2921,7 @@ if (my_id .eq. 0) then
   endif
   if (with_TiTe)  write(*,'(A,1e14.6,A)') ' Electron-ion energy exchange    : ', total_P_ei/1.d6, ' [MW]'
 
+  if (allocated(xtime_radiation)) then
   if (index_now > 1) then
     xtime_radiation(index_now) = xtime_radiation(index_now-1) + t_norm * tstep * total_radiation
   else if (index_now == 1) then
@@ -2977,6 +2932,8 @@ if (my_id .eq. 0) then
   xtime_rad_cooling_power(index_now) = total_radiation_cooling
   end if
 
+  endif
+
   if (output_prad_phi) then
     open(20,file="total_radiation_phi.dat",action="write",position="append")
     do i_phi = 1, n_plane
@@ -2985,6 +2942,7 @@ if (my_id .eq. 0) then
     close (20)
   end if
 
+#if (defined WITH_Neutrals) || (defined WITH_Impurities)
   if (with_neutrals) then
     if (index_now > 1) then
       xtime_E_ion(index_now) = xtime_E_ion(index_now-1) + t_norm * tstep * total_P_ion
@@ -3002,8 +2960,9 @@ if (my_id .eq. 0) then
   if (with_TiTe) then
     if (index_now > 0) xtime_P_ei(index_now) = total_P_ei
   endif
-
 #endif
+
+  endif
 
   do k = 1, n_var
     write(*,'(A,i3,A20,2es14.6)') ' min/max', k, trim(variable_names(k)), V_min(k), V_max(k)
