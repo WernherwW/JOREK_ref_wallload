@@ -171,6 +171,7 @@ real*8  :: varmin(n_var), varmax(n_var), V_min(n_var), V_max(n_var)
 !> for use_ncs
 real*8  :: aux_rho0, aux_E0, aux_mom_par0
 real*8  :: aux_E0_Ti, aux_E0_Te
+real*8  :: aux_jre ! Projected particle RE current, when auxiliary fields are supplied
 real*8  :: aux_P0, aux_P0_s,  aux_P0_t, aux_P0_p, aux_q0, aux_jx0, aux_jy0, aux_jz0, aux_jz0_pcs 
 !Ionisation recombination for aux/use_ncs purposes. 
 real*8  :: Nion, Nrec, Prec, Prb, Prb_cooling !Also needed for use_ncs
@@ -459,7 +460,7 @@ Tie_min_neg = 0.5*T_min_neg
 !$omp          local_mom_par_int, local_mom_par_ext, local_mom_par_tot,                                       &
 !$omp          use_ncs, use_ics, local_Nion, local_Nrec, local_Prec, local_Prb, local_Prb_cooling,            &
 !$omp          local_aux_mom_par_int,local_aux_mom_par_ext,local_aux_mom_par_tot, n_aux_var,                  &
-!$omp          rho_idx_kin, mom_par_idx_kin,                                                                  &
+!$omp          use_rep, j_Phi_idx_kin, rho_idx_kin, mom_par_idx_kin,                                   &
 !$omp          local_pn_e, local_pn_i, local_pn,                                                              &
 #ifdef WITH_TiTe
 !$omp           E_Te_idx_kin, E_Ti_idx_kin,                                                                   &
@@ -504,7 +505,7 @@ Tie_min_neg = 0.5*T_min_neg
 !$omp           dSion_dT_ncs, eq_aux_g, eq_aux_s, eq_aux_t, eq_aux_p, aux_rho0, aux_mom_par0,                 &
 !$omp           aux_P0, aux_P0_s, aux_P0_t, aux_P0_p, aux_q0, aux_jx0, aux_jy0, aux_jz0, aux_jz0_pcs,         &
 !$omp           eta_T_ohm, rn0, rn0_corr, rimp0, rimp0_corr, Z_eff, lnA, alpha_e,                             &
-!$omp           aux_E0_Ti, aux_E0_Te, aux_E0,                                                                 &
+!$omp           aux_jre, aux_E0_Ti, aux_E0_Te, aux_E0,                                                        &
 !$omp           i_imp, frad_bg, Lrad_imp, Te_corr_eV, Te_eV, ne_SI, Ti_eV,                                    &
 #if (defined WITH_Neutrals) || (defined WITH_Impurities)
 !$omp           spi_R_tmp, spi_Z_tmp, spi_phi_tmp, ns_radius_tmp,                                             &
@@ -750,6 +751,13 @@ aux_q0    = 0.d0; aux_jx0   = 0.d0; aux_jy0   = 0.d0; aux_jz0   = 0.d0; aux_jz0_
         T_or_Te_0     = T_0
 #endif
         zj0    = eq_g(mp,var_zj,ms,mt)
+        ! Live diagnostics receive the particle feedback; legacy postprocessing may omit it.
+        aux_jre = 0.d0
+        if (present(aux_node_list)) then
+          if (use_rep .and. j_Phi_idx_kin > 0 .and. j_Phi_idx_kin <= n_aux_var) then
+            aux_jre = eq_aux_g(mp,j_Phi_idx_kin,ms,mt)
+          endif
+        endif
         ps0    = eq_g(mp,var_psi,ms,mt)
         ps0_s  = eq_s(mp,var_psi,ms,mt) 
         ps0_t  = eq_t(mp,var_psi,ms,mt)
@@ -1243,7 +1251,7 @@ aux_q0    = 0.d0; aux_jx0   = 0.d0; aux_jy0   = 0.d0; aux_jz0   = 0.d0; aux_jz0_
         VB_tot = VB_tot + 2.0*r0*T0 / BB2 * xjac * BigR * wst * delta_phi
         mag_pres_tot = mag_pres_tot + BB2/2 * xjac * BigR * wst * delta_phi
 #endif
-        J2_tot = J2_tot + eta_T_ohm *(ZJ0/BigR)**2.d0 * xjac * BigR * wst * delta_phi
+        J2_tot = J2_tot + eta_T_ohm *((ZJ0-aux_jre)/BigR)**2.d0 * xjac * BigR * wst * delta_phi
         
         ! Momentum in the Cartesian x- and y-directions
         momentum_x = momentum_x + r0*(-BigR**2*dudy*cos(phi) - F0*vpar0*sin(phi) + vpar0*dpsidy*cos(phi))*xjac*wst*delta_phi
@@ -1504,7 +1512,7 @@ aux_q0    = 0.d0; aux_jx0   = 0.d0; aux_jy0   = 0.d0; aux_jz0   = 0.d0; aux_jz0_
           VB_int = VB_int + 2.0*r0*T0 / BB2 * xjac * BigR * wst * delta_phi
           mag_pres_int = mag_pres_int + BB2/2 * xjac * BigR * wst * delta_phi
 #endif
-          J2_int = J2_int + eta_T_ohm * (ZJ0/BigR)**2.d0 * xjac * BigR * wst * delta_phi
+          J2_int = J2_int + eta_T_ohm * ((ZJ0-aux_jre)/BigR)**2.d0 * xjac * BigR * wst * delta_phi
 
           if (use_ncs .or. use_ics) then 
             local_aux_mom_par_int=local_aux_mom_par_int+ aux_mom_par0 /sqrt(BB2)* xjac * BigR * wst * delta_phi !*sqrt(BB2)
@@ -1568,7 +1576,7 @@ aux_q0    = 0.d0; aux_jx0   = 0.d0; aux_jy0   = 0.d0; aux_jz0   = 0.d0; aux_jz0_
           VB_ext = VB_ext + 2.0*r0*T0 / BB2 * xjac * BigR * wst * delta_phi
           mag_pres_ext = mag_pres_ext + BB2/2 * xjac * BigR * wst * delta_phi
 #endif
-          J2_ext = J2_ext + eta_T_ohm * (ZJ0/BigR)**2.d0 * xjac * BigR * wst * delta_phi
+          J2_ext = J2_ext + eta_T_ohm * ((ZJ0-aux_jre)/BigR)**2.d0 * xjac * BigR * wst * delta_phi
 
           if (use_ncs .or. use_ics) then 
             local_aux_mom_par_ext=local_aux_mom_par_ext+ aux_mom_par0 /sqrt(BB2)* xjac * BigR * wst * delta_phi !*sqrt(BB2)
