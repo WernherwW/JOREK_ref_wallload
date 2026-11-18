@@ -57,6 +57,7 @@ implicit none
 
 private
 public :: octree_node, mod_wall_collision_init, mod_wall_collision_check, mod_wall_collision_free, mod_wall_collision_export
+public :: mod_wall_collision_check_restart, wall_impact_energy
 public :: octree_triangle, octree_init, octree_free, octree_find, &
           mod_wall_collision_intersect ! For unit tests
 
@@ -80,10 +81,75 @@ end type octree_node
 contains
 
 
-subroutine mod_wall_collision_export(sim, file, iangle_groups)
+function wall_impact_energy(sim, particle, mass, time) result(energy)
+  type(particle_sim), intent(in) :: sim
+  class(particle_base), intent(in) :: particle
+  real*8, intent(in) :: mass, time
+  real*8 :: energy, E(3), B(3), psi, U, gamma, st(2), r_found, z_found
+  integer :: i_elm, ierr
+
+  energy = 0.d0
+  select type (particle)
+  type is (particle_kinetic_relativistic)
+    gamma = sqrt(1.d0 + dot_product(particle%p, particle%p)/(mass*SPEED_OF_LIGHT)**2)
+  type is (particle_gc_relativistic)
+    i_elm = 0
+    call find_RZ(sim%fields%node_list, sim%fields%element_list, particle%x(1), particle%x(2), &
+                r_found, z_found, i_elm, st(1), st(2), ierr)
+    if (ierr /= 0) return
+    call sim%fields%calc_EBpsiU(time, i_elm, st, particle%x(3), E, B, psi, U)
+    gamma = sqrt(1.d0 + particle%p(1)**2/(mass*SPEED_OF_LIGHT)**2 &
+                 + 2*particle%p(2)*norm2(B)/(mass*SPEED_OF_LIGHT**2))
+  class default
+    return
+  end select
+  energy = (gamma - 1.d0)*mass*ATOMIC_MASS_UNIT*SPEED_OF_LIGHT**2
+end function wall_impact_energy
+
+subroutine mod_wall_collision_check_restart(sim, file)
+  type(particle_sim), intent(in) :: sim
+  character(len=*), intent(in) :: file
+  integer(HID_T) :: file_id
+  integer :: ierr
+  real*8 :: time
+  logical :: has_time
+
+  if (sim%my_id /= 0) return
+  call HDF5_open(file, file_id, ierr)
+  if (ierr /= 0) then
+    write(*,*) 'Cannot open wall-load restart file ', trim(file)
+    call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+  end if
+  has_time = .false.
+  call h5lexists_f(file_id, '/time', has_time, ierr)
+  if (ierr /= 0 .or. .not. has_time) then
+    write(*,*) 'Missing checkpoint time in ', trim(file)
+    call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+  end if
+  call HDF5_real_reading(file_id, time, '/time')
+  call HDF5_close(file_id)
+  if (abs(time - sim%time) > 1.d-14) then
+    write(*,*) 'Particle and wall-load checkpoint times differ: ', sim%time, time
+    call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+  end if
+end subroutine mod_wall_collision_check_restart
+
+subroutine mod_wall_collision_export(sim, file, iangle_groups, impact_wall, impact_energy, previous_file)
   type(particle_sim), intent(in) :: sim    !< The particle sim struct
   character(len=*),   intent(in) :: file   !< Filename for output
   real*8, intent(in) :: iangle_groups(:,:) !< Angle of incidence (ngroup,nprt) for all markers in this process (dummy for confined markers)
+
+  ! Explicit impacts select only the collisions accumulated since the previous export.
+  integer, optional, intent(in) :: impact_wall(:,:)
+  real*8, optional, intent(in) :: impact_energy(:,:)
+  character(len=*), optional, intent(in) :: previous_file
+
+  integer :: n_previous
+  integer, allocatable :: previous_ids(:)
+  real*8, allocatable :: previous_particles(:), previous_energy(:), previous_angle(:)
+  real*8, allocatable :: total_particles(:), total_energy(:), angle_energy(:)
+  logical, allocatable :: wetted(:)
+  logical :: have_previous
 
   integer              :: n_wetted               ! Number of wetted triangles
   integer, allocatable :: wetted_id(:)           ! IDs of wetted triangles (i.e. their position index in wall input)
@@ -95,21 +161,30 @@ subroutine mod_wall_collision_export(sim, file, iangle_groups)
   real*8, allocatable  :: weight_all(:), energy_all(:), weight(:), energy(:), iangle(:), iangle_all(:)
 
   character(len=5) :: group_name
-  integer(HID_T) :: file_id, group_id
-  integer :: ierr, my_id, n_mpi, n_total, n_here, minid, maxid, i, j, k, i_elm
-  real*8 :: E(3), B(3), psi, U, gamma
+  integer(HID_T) :: file_id, group_id, previous_id
+  integer :: ierr, my_id, n_mpi, n_total, n_here, maxid, i, j, k
 
   call MPI_COMM_RANK(MPI_COMM_WORLD, my_id, ierr)
   call MPI_COMM_SIZE(MPI_COMM_WORLD, n_mpi, ierr)
 
+  have_previous = .false.
+  if (present(previous_file)) have_previous = len_trim(previous_file) > 0
+
   if ( my_id .eq. 0 ) then
+     if (have_previous) then
+        call HDF5_open(previous_file, previous_id, ierr)
+        if (ierr /= 0) then
+           write(*,*) 'Cannot open previous wall-load checkpoint ', trim(previous_file)
+           call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+        end if
+     end if
      call HDF5_create(file, file_id, ierr)
      if( ierr .ne. 0 ) then
         write(*,*) "Could not create file for wall load output."
-        deallocate( wetted_id, particle_deposition, energy_deposition )
         call MPI_Abort(MPI_COMM_WORLD, -1, ierr)
         return
      end if
+     call HDF5_real_saving(file_id, sim%time, '/time')
   end if
 
   if (allocated(sim%groups)) then
@@ -136,38 +211,27 @@ subroutine mod_wall_collision_export(sim, file, iangle_groups)
 
         ! Collect wall IDs, weights, and evaluate energy. TODO add other particle types
         allocate( wall_id(n_here), weight(n_here), energy(n_here), iangle(n_here) )
-        energy = 0.d0 !< markers whose energy cannot be evaluated below must not contribute
-        do k=1,n_here
-           wall_id(k) = -sim%groups(i)%particles(k)%i_elm ! Assuming i_elm = - wall_id for markers that were lost.
-           weight(k)  = sim%groups(i)%particles(k)%weight
-           iangle(k)  = iangle_groups(i,k)
+        wall_id = 0
+       weight = 0.d0
+       energy = 0.d0
+       iangle = 0.d0
+       do k=1,n_here
+          if (present(impact_wall)) then
+             wall_id(k) = impact_wall(i,k)
+          else
+             wall_id(k) = -sim%groups(i)%particles(k)%i_elm
+          end if
+          if (wall_id(k) <= 0) cycle
+          weight(k) = sim%groups(i)%particles(k)%weight
+          iangle(k) = iangle_groups(i,k)
+          if (present(impact_energy)) then
+             energy(k) = impact_energy(i,k)
+          else
+             energy(k) = wall_impact_energy(sim, sim%groups(i)%particles(k), sim%groups(i)%mass, sim%time)
+          end if
+       end do
 
-           ! Energy has to be evaluated separately
-           select type (p => sim%groups(i)%particles)
-           type is (particle_kinetic_relativistic)
-              ! Evaluate kinetic energy from momentum [AMU*m/s]
-              gamma = sqrt( 1.d0 + dot_product(p(k)%p, p(k)%p) / (sim%groups(i)%mass*SPEED_OF_LIGHT)**2 )
-              energy(k) = ( gamma - 1.d0 ) * sim%groups(i)%mass * ATOMIC_MASS_UNIT * SPEED_OF_LIGHT**2
-           type is (particle_gc_relativistic)
-              ! Evaluate kinetic energy from parallel momentum [AMU*m/s] and magnetic moment [(AMU*m**2)/(T*s**2)]
-              call find_RZ(sim%fields%node_list, sim%fields%element_list, p(k)%x(1), p(k)%x(2), &
-                   p(k)%x(1), p(k)%x(2), i_elm, p(k)%st(1), p(k)%st(2), ierr)
-              if( ierr .ne. 0) cycle
-              call sim%fields%calc_EBpsiU(sim%time, i_elm, p(k)%st, p(k)%x(3), E, B, psi, U)
-              
-              gamma = sqrt( 1.d0 + p(k)%p(1)**2 / (sim%groups(i)%mass*SPEED_OF_LIGHT)**2 &
-                             + 2 * p(k)%p(2) * norm2(B) / (sim%groups(i)%mass*SPEED_OF_LIGHT**2) )
-              energy(k) = ( gamma - 1.d0 ) * sim%groups(i)%mass * ATOMIC_MASS_UNIT * SPEED_OF_LIGHT**2
-           class default
-              ! Not yet implemented, write error message (but only for the first marker)
-              if(k .eq. 1) then
-                 write(*,*) "WARNING: The requested type is not yet implemented in mod_wall_collision_export." 
-                 write(*,*) "Wall ID and particle load will be stored but not the heat load."
-              end if
-           end select
-        end do
-
-        ! Gather data from other processes
+       ! Gather data from other processes
         allocate( wall_id_all(n_total), weight_all(n_total), energy_all(n_total), iangle_all(n_total) )
         call MPI_Gatherv(wall_id(:), n_here, MPI_INTEGER, &
              wall_id_all(:), particles_per_proc, [(sum(particles_per_proc(0:i-1),1), i=0,n_mpi-1)], &
@@ -188,42 +252,58 @@ subroutine mod_wall_collision_export(sim, file, iangle_groups)
         deallocate(particles_per_proc, wall_id, energy, weight, iangle)
 
         if( my_id .eq. 0 ) then
-           ! Find how many unique wetted wall IDs there are
-           n_wetted = 0
-           minid = minval(wall_id_all, wall_id_all .gt. 0)
-           maxid = maxval(wall_id_all)
-           if( maxid .eq. 0) then
-              write(*,*) 'No losses. Therefore no wall load output is generated for group ', i
-              deallocate(wall_id_all, weight_all, energy_all, iangle_all)
-              cycle
-           end if
+           n_previous = 0
+          if (have_previous) call HDF5_integer_reading(previous_id, n_previous, group_name//'nwetted')
 
-           do k = minid,maxid
-              if( any(wall_id_all .eq. k) ) n_wetted = n_wetted + 1
-           end do
-           allocate( wetted_id(n_wetted), particle_deposition(n_wetted), energy_deposition(n_wetted), iangle_mean(n_wetted) )
+          maxid = max(0, maxval(wall_id_all))
+          if (n_previous > 0) then
+             allocate(previous_ids(n_previous), previous_particles(n_previous), &
+                      previous_energy(n_previous), previous_angle(n_previous))
+             call HDF5_array1D_reading_int(previous_id, previous_ids, group_name//'wallid')
+             call HDF5_array1D_reading(previous_id, previous_particles, group_name//'particledepot')
+             call HDF5_array1D_reading(previous_id, previous_energy, group_name//'energydepot')
+             call HDF5_array1D_reading(previous_id, previous_angle, group_name//'angleofincidence')
+             maxid = max(maxid, maxval(previous_ids))
+          end if
 
-           ! Compute loads for each wetted wall element
-           j = 1
-           do k = minid,maxid
-              if( any(wall_id_all .eq. k) ) then
-                 wetted_id(j) = k
-                 particle_deposition(j) = sum(weight_all, wall_id_all .eq. k)
-                 energy_deposition(j)   = sum(weight_all*energy_all, wall_id_all .eq. k)
-                 iangle_mean(j)         = sum(weight_all*energy_all*iangle_all, wall_id_all .eq. k) / energy_deposition(j)
-                 j = j + 1
-              end if
-           end do
-           deallocate(wall_id_all, weight_all, energy_all)
-  
-           ! Write and clean
-           call HDF5_integer_saving(file_id, n_wetted, group_name//'nwetted')
-           call HDF5_array1D_saving_int(file_id, wetted_id, n_wetted, group_name//'wallid')
-           call HDF5_array1D_saving(file_id, particle_deposition, n_wetted, group_name//'particledepot')
-           call HDF5_array1D_saving(file_id, energy_deposition, n_wetted, group_name//'energydepot')
-           call HDF5_array1D_saving(file_id, iangle_mean, n_wetted, group_name//'angleofincidence')
-           deallocate( wetted_id, particle_deposition, energy_deposition )
-        end if
+          allocate(wetted(maxid), total_particles(maxid), total_energy(maxid), angle_energy(maxid))
+          wetted = .false.
+          total_particles = 0.d0
+          total_energy = 0.d0
+          angle_energy = 0.d0
+          if (n_previous > 0) then
+             wetted(previous_ids) = .true.
+             total_particles(previous_ids) = previous_particles
+             total_energy(previous_ids) = previous_energy
+             angle_energy(previous_ids) = previous_energy*previous_angle
+             deallocate(previous_ids, previous_particles, previous_energy, previous_angle)
+          end if
+
+          do k=1,n_total
+             j = wall_id_all(k)
+             if (j <= 0) cycle
+             wetted(j) = .true.
+             total_particles(j) = total_particles(j) + weight_all(k)
+             total_energy(j) = total_energy(j) + weight_all(k)*energy_all(k)
+             angle_energy(j) = angle_energy(j) + weight_all(k)*energy_all(k)*iangle_all(k)
+          end do
+
+          n_wetted = count(wetted)
+          call HDF5_integer_saving(file_id, n_wetted, group_name//'nwetted')
+          if (n_wetted > 0) then
+             wetted_id = pack([(j, j=1,maxid)], wetted)
+             particle_deposition = pack(total_particles, wetted)
+             energy_deposition = pack(total_energy, wetted)
+             iangle_mean = pack(angle_energy, wetted)
+             where (energy_deposition /= 0.d0) iangle_mean = iangle_mean/energy_deposition
+             call HDF5_array1D_saving_int(file_id, wetted_id, n_wetted, group_name//'wallid')
+             call HDF5_array1D_saving(file_id, particle_deposition, n_wetted, group_name//'particledepot')
+             call HDF5_array1D_saving(file_id, energy_deposition, n_wetted, group_name//'energydepot')
+             call HDF5_array1D_saving(file_id, iangle_mean, n_wetted, group_name//'angleofincidence')
+             deallocate(wetted_id, particle_deposition, energy_deposition, iangle_mean)
+          end if
+          deallocate(wetted, total_particles, total_energy, angle_energy)
+       end if
      end do
   end if
 
