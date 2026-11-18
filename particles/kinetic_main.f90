@@ -46,7 +46,7 @@ use mod_output_file_routines, only: write_to_outputfile
 use mod_neutral_density, only: get_neutral_density
 use mod_impurity,        only: init_imp_adas
 
-use phys_module, only: index_now
+use phys_module, only: index_now, index_start
 use phys_module, only: tstep,tstep_n,restart_particles, restart, t_start, nout
 use phys_module, only: CENTRAL_MASS, CENTRAL_DENSITY, xcase, xpoint
 use phys_module, only: n_part_groups, n_aux_var, n_valves_max
@@ -151,14 +151,16 @@ endif ! (restart_particles)
 
 
 ! Read Open ADAS data for plasma fluid
+! The field reader has already imported histories on rank 0. Preserve them;
+! initialize storage on other ranks and for restarts without history.
 if (deuterium_adas) ad_deuterium =  read_adf11(sim%my_id,'96_h') !< move to core (jorek2_main for particles)
 
 #if (defined WITH_Impurities)
   ! --- Read ADAS data and generate coronal equilibrium if needed
-  call init_imp_adas(sim%my_id)
+  call init_imp_adas(sim%my_id, initialize_history=(sim%my_id /= 0 .or. index_start == 0))
 #else
   if (use_imp_adas .and. any(nimp_bg(1:n_adas) > 0.d0)) then
-    call init_imp_adas(sim%my_id)
+    call init_imp_adas(sim%my_id, initialize_history=(sim%my_id /= 0 .or. index_start == 0))
   endif
 #endif
 

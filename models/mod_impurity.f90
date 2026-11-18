@@ -4,7 +4,7 @@ module mod_impurity
 
   contains 
 
-  subroutine init_imp_adas(my_id)
+  subroutine init_imp_adas(my_id, initialize_history)
 
     use phys_module
     use mod_openadas
@@ -13,6 +13,7 @@ module mod_impurity
 
     implicit none
 
+    logical, intent(in), optional :: initialize_history
     integer, intent(in) :: my_id
     integer             :: i
 
@@ -69,6 +70,11 @@ module mod_impurity
         ! function of temperature assuming constant density
         if (my_id == 0) call output_coronal(imp_cor(i),i)
       end do
+    end if
+
+    ! ADAS tables may be initialized after restart histories have been read.
+    if (present(initialize_history)) then
+      if (.not. initialize_history) return
     end if
 
     if (allocated(xtime_radiation)) call tr_deallocate(xtime_radiation,"xtime_radiation",CAT_GRID)
