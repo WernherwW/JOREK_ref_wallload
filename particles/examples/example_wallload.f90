@@ -20,9 +20,24 @@ use mod_wall_collision
 use constants, only: PI
 use phys_module, only: tstep_particles, nstep_particles, nout_particles, restart, restart_particles, &
                        wall_collision_model, max_depth_wall
-use mpi, only: MPI_Bcast, MPI_Abort, MPI_INTEGER, MPI_COMM_WORLD
+use mpi, only: wallload_mpi_integer => MPI_INTEGER, wallload_comm => MPI_COMM_WORLD
                   
 implicit none
+
+interface
+  subroutine find_RZ(node_list, element_list, R_find, Z_find, R_out, Z_out, ielm_out, s_out, t_out, ifail)
+    use data_structure, only: type_node_list, type_element_list
+    implicit none
+    type(type_node_list), intent(in) :: node_list
+    type(type_element_list), intent(in) :: element_list
+    real*8, intent(in) :: R_find, Z_find
+    real*8, intent(out) :: R_out, Z_out, s_out, t_out
+    integer, intent(inout) :: ielm_out
+    integer, intent(out) :: ifail
+  end subroutine find_RZ
+end interface
+
+external :: MPI_Bcast, MPI_Abort
 
 ! Set up the simulation variables
 real(kind=8)                      :: timesteps(1)
@@ -72,7 +87,7 @@ events(2)%start = sim%time + sim_time
 
 if (nout_particles <= 0 .or. timesteps(1) <= 0.d0) then
   if (sim%my_id == 0) write(*,*) 'nout_particles and tstep_particles must be positive.'
-  call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+  call MPI_Abort(wallload_comm, 1, ierr)
 end if
 
 if (.not. (restart .or. restart_particles)) then
@@ -181,7 +196,7 @@ do while (.not. sim%stop_now .and. .not. fields_exhausted .and. sim%time < event
     type is (read_jorek_fields_interp_linear)
       fluid_step = reader%i
     end select
-    call MPI_Bcast(fluid_step, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+    call MPI_Bcast(fluid_step, 1, wallload_mpi_integer, 0, wallload_comm, ierr)
     if (mod(fluid_step, nout_particles) == 0) then
       write(step_name, '(i0.5)') fluid_step
       particle_file = 'part_out_fluid'//trim(step_name)//'.h5'
