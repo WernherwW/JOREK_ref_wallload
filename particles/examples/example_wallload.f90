@@ -20,7 +20,8 @@ use mod_wall_collision
 use constants, only: PI
 use phys_module, only: tstep_particles, nstep_particles, nout_particles, restart, restart_particles, &
                        wall_collision_model, max_depth_wall
-use mpi, only: wallload_mpi_integer => MPI_INTEGER, wallload_comm => MPI_COMM_WORLD
+use mpi, only: wallload_mpi_integer => MPI_INTEGER, wallload_comm => MPI_COMM_WORLD, &
+               wallload_abort => MPI_Abort
                   
 implicit none
 
@@ -37,7 +38,7 @@ interface
   end subroutine find_RZ
 end interface
 
-external :: MPI_Bcast, MPI_Abort
+external :: MPI_Bcast
 
 ! Set up the simulation variables
 real(kind=8)                      :: timesteps(1)
@@ -87,7 +88,7 @@ events(2)%start = sim%time + sim_time
 
 if (nout_particles <= 0 .or. timesteps(1) <= 0.d0) then
   if (sim%my_id == 0) write(*,*) 'nout_particles and tstep_particles must be positive.'
-  call MPI_Abort(wallload_comm, 1, ierr)
+  call wallload_abort(wallload_comm, 1, ierr)
 end if
 
 if (.not. (restart .or. restart_particles)) then
