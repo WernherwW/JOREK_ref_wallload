@@ -199,9 +199,11 @@ subroutine mod_wall_collision_export(sim, file, iangle_groups, impact_wall, impa
         ! Release the input before creating output, including when the paths alias.
         call HDF5_close(previous_id)
      end if
+     write(*,*) 'Creating wall-load checkpoint ', trim(file)
      call HDF5_create(file, file_id, ierr)
      if( ierr .ne. 0 ) then
         write(*,*) "Could not create wall-load checkpoint ", trim(file)
+        call report_open_wallload_files()
         call MPI_Abort(MPI_COMM_WORLD, -1, ierr)
         return
      end if
@@ -334,6 +336,24 @@ subroutine mod_wall_collision_export(sim, file, iangle_groups, impact_wall, impa
   
 end subroutine mod_wall_collision_export
 
+!> Identify handles retaining files when checkpoint creation fails.
+subroutine report_open_wallload_files()
+  integer(HID_T), allocatable :: ids(:)
+  integer(SIZE_T) :: n_open, name_length
+  integer :: ierr, i, object_types
+  character(len=1024) :: filename
+
+  object_types = ior(H5F_OBJ_FILE_F, ior(H5F_OBJ_DATASET_F, H5F_OBJ_GROUP_F))
+  call h5fget_obj_count_f(int(H5F_OBJ_ALL_F, HID_T), object_types, n_open, ierr)
+  if (ierr /= 0 .or. n_open == 0) return
+  allocate(ids(n_open))
+  call h5fget_obj_ids_f(int(H5F_OBJ_ALL_F, HID_T), object_types, n_open, ids, ierr)
+  if (ierr /= 0) return
+  do i=1,int(n_open)
+     call h5fget_name_f(ids(i), filename, name_length, ierr)
+     if (ierr == 0) write(*,*) 'Open HDF5 handle ', ids(i), ' file ', trim(filename)
+  end do
+end subroutine report_open_wallload_files
 !> Initialize the wall data.
 !>
 !> Wall data is read from HDF5 file and octree is initialized.
