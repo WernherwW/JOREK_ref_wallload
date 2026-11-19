@@ -180,7 +180,7 @@ subroutine mod_wall_collision_export(sim, file, iangle_groups, impact_wall, impa
      end if
      call HDF5_create(file, file_id, ierr)
      if( ierr .ne. 0 ) then
-        write(*,*) "Could not create file for wall load output."
+        write(*,*) "Could not create wall-load checkpoint ", trim(file)
         call MPI_Abort(MPI_COMM_WORLD, -1, ierr)
         return
      end if
@@ -304,10 +304,13 @@ subroutine mod_wall_collision_export(sim, file, iangle_groups, impact_wall, impa
           end if
           deallocate(wetted, total_particles, total_energy, angle_energy)
        end if
+       deallocate(wall_id_all, weight_all, energy_all, iangle_all)
      end do
   end if
 
   if (my_id .eq. 0) then
+     ! Close both files before HDF5_close shuts down the Fortran HDF5 interface.
+     if (have_previous) call h5fclose_f(previous_id, ierr)
      call HDF5_close(file_id)
      write(*,*) 'Wall loads stored at ', file
   end if
