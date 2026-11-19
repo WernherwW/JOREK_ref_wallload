@@ -56,6 +56,7 @@ type(particle_kinetic_relativistic), allocatable :: prtkin(:)
 real*8 :: rnd(1), psi, U, B(3), E(3)
 
 type(octree_node) :: wall
+class(action), pointer :: field_action
 
 ! Read and broadcast input parameters before loading the wall model.
 call sim%initialize(num_groups=1)
@@ -193,7 +194,13 @@ do while (.not. sim%stop_now .and. .not. fields_exhausted .and. sim%time < event
 
   sim%time = target_time
   if (at_fluid_step) then
-    select type (reader => events(1)%stored_action)
+    ! Match event_run: the action pointer takes precedence over stored_action.
+    if (associated(events(1)%action)) then
+      field_action => events(1)%action
+    else
+      field_action => events(1)%stored_action
+    end if
+    select type (reader => field_action)
     type is (read_jorek_fields_interp_linear)
       fluid_step = reader%i
     end select
