@@ -207,8 +207,8 @@ do while (.not. sim%stop_now .and. .not. fields_exhausted .and. sim%time < event
     call MPI_Bcast(fluid_step, 1, wallload_mpi_integer, 0, wallload_comm, ierr)
     if (mod(fluid_step, nout_particles) == 0) then
       write(step_name, '(i0.5)') fluid_step
-      particle_file = 'part_out_fluid'//trim(step_name)//'.h5'
-      wallload_file = 'wallload_fluid'//trim(step_name)//'.h5'
+      particle_file = 'part_out'//trim(step_name)//'.h5'
+      wallload_file = 'wallload'//trim(step_name)//'.h5'
       call write_checkpoint(particle_file, wallload_file)
     end if
   end if
